@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx server/index.ts",
     "build": "vite build",
-    "build:api": "esbuild server/vercelEntry.ts --bundle --platform=node --format=cjs --outfile=api/index.cjs --packages=external",
+    "build:api": "esbuild server/vercelEntry.ts --bundle --platform=node --format=esm --outfile=api/index.js --packages=external",
     "start": "cross-env NODE_ENV=production tsx server/index.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist",
