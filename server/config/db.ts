@@ -23,6 +23,9 @@ export async function connectToDatabase(): Promise<typeof mongoose> {
 
   await mongoose.connect(uri, {
     dbName: process.env.MONGODB_DB_NAME || undefined,
+    // Fail fast with a real error instead of hanging until the platform's
+    // own function timeout kills the process silently.
+    serverSelectionTimeoutMS: 8000,
   });
 
   isConnected = true;
