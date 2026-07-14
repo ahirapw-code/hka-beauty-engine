@@ -11,7 +11,7 @@ const ALL_ROLES: Role[] = ["HKA_MANAGEMENT", "SALON_MANAGER", "THERAPIST"];
  * only change through dedicated, audited flows (register/reset-password
  * controllers, checkout/payroll-run logic, etc).
  */
-const PROTECTED_FIELDS: Record<string, string[]> = {
+export const PROTECTED_FIELDS: Record<string, string[]> = {
   users: ["role", "branch", "passwordHash", "email", "forcePasswordChange"],
   therapists: ["currentSales", "totalCommissionEarned"],
 };
