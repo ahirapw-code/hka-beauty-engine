@@ -2,6 +2,7 @@
   "name": "hka-beauty-engine",
   "private": true,
   "version": "1.0.0",
+  "type": "module",
   "scripts": {
     "dev": "tsx server/index.ts",
     "build": "vite build",
