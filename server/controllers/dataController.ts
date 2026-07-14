@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { collectionRegistry } from "../models.js";
+import { collectionRegistry } from "../models/index.js";
 
 function getModel(req: Request, res: Response) {
   const { collection } = req.params;
