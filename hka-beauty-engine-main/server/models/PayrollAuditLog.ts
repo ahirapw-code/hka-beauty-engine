@@ -1,0 +1,34 @@
+import { Schema, model, models, Document, Types } from "mongoose";
+
+export interface IPayrollAuditLog extends Document {
+  therapistId: string;
+  field: string;
+  oldValue: number | null;
+  newValue: number | null;
+  source: string;
+  timestamp: string;
+}
+
+const PayrollAuditLogSchema = new Schema<IPayrollAuditLog>(
+  {
+    therapistId: { type: String, required: true },
+    field: { type: String, required: true },
+    oldValue: { type: Schema.Types.Mixed, default: null },
+    newValue: { type: Schema.Types.Mixed, default: null },
+    source: { type: String, required: true },
+    timestamp: { type: String, required: true },
+  },
+  {
+    versionKey: false,
+    toJSON: {
+      transform: (_doc, ret: any) => {
+        ret.id = ret._id?.toString?.() ?? ret._id;
+        delete ret.__v;
+        return ret;
+      },
+    },
+  }
+);
+
+export default models.PayrollAuditLog ||
+  model<IPayrollAuditLog>("PayrollAuditLog", PayrollAuditLogSchema, "payrollAuditLog");
