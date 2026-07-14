@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
-import { collectionRegistry } from "../models/index.js";
+import { collectionRegistry } from "../models";
+import { PROTECTED_FIELDS } from "../middleware/authorize";
 
 function getModel(req: Request, res: Response) {
   const { collection } = req.params;
@@ -125,6 +126,30 @@ export async function setDocument(req: Request, res: Response) {
         { upsert: true, new: true, setDefaultsOnInsert: true }
       );
       return res.status(200).json({ success: true, data: updated.toJSON() });
+    }
+
+    // CRITICAL: a non-merge write (setDoc without {merge:true}) is a full
+    // document replace. Some collections (notably `users`) store
+    // server-managed fields - passwordHash above all - that the client can
+    // never legitimately include in its payload, because they are stripped
+    // from every read the client ever receives. Without this guard, any
+    // ordinary profile write (e.g. completing registration, an admin
+    // creating/editing staff) would silently erase the existing password
+    // hash and lock the account out on its very next login. Preserve any
+    // such field from the existing document whenever the incoming payload
+    // doesn't explicitly provide it.
+    const protectedFields = PROTECTED_FIELDS[req.params.collection];
+    if (protectedFields && protectedFields.length > 0) {
+      const missing = protectedFields.filter((f) => payload[f] === undefined);
+      if (missing.length > 0) {
+        const existing = await model.findById(req.params.id).select(missing.join(" "));
+        if (existing) {
+          for (const field of missing) {
+            const value = (existing as any)[field];
+            if (value !== undefined) payload[field] = value;
+          }
+        }
+      }
     }
 
     const doc = await model.findOneAndReplace({ _id: req.params.id }, payload, {
