@@ -297,7 +297,12 @@ export default function GoogleSheetsSync({
     } catch (error: any) {
       console.error(error);
       setSyncStatus('error');
-      setErrorMessage('Login Google dibatalkan atau gagal.');
+      const raw = error?.message || String(error);
+      setErrorMessage(
+        raw && raw !== 'undefined'
+          ? `Login Google gagal: ${raw}`
+          : 'Login Google dibatalkan atau gagal.'
+      );
     }
   };
 
