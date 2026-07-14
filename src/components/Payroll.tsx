@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { User, Branch, Therapist, Payroll } from '../types';
-import { db } from '../lib/firebase';
+import { db, auth } from '../lib/firebase';
 import { collection, doc, setDoc, updateDoc, deleteDoc, getDocs, query, where } from '../lib/firestoreClient';
 import { calculateTherapistPayrollForPeriod, calculateStaffAttendance } from '../lib/payrollService';
 import { formatIDR } from '../utils';
@@ -215,8 +215,20 @@ export default function PayrollComponent({ user, selectedBranch: initialBranch }
         generatedBy: user.name || user.email
       };
 
-      await setDoc(doc(db, 'payroll', payrollId), newPayroll);
-      
+      const idToken = await auth.currentUser?.getIdToken();
+      const response = await fetch('/api/payroll/run', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+        },
+        body: JSON.stringify(newPayroll),
+      });
+      const resData = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(resData.error || `Failed to create payroll draft (status ${response.status})`);
+      }
+
       // Update local state
       setExistingPayrolls(prev => [...prev.filter(p => p.id !== payrollId), newPayroll]);
     } catch (err: any) {

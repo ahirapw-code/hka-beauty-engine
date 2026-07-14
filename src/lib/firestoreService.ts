@@ -79,7 +79,20 @@ export async function addCustomer(customer: Customer): Promise<void> {
 export async function addBooking(booking: Booking): Promise<void> {
   const path = `bookings/${booking.id}`;
   try {
-    await setDoc(doc(db, 'bookings', booking.id), booking);
+    const idToken = await auth.currentUser?.getIdToken();
+    const { id, ...body } = booking as any;
+    const response = await fetch('/api/bookings', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {})
+      },
+      body: JSON.stringify(body)
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || `Failed to create booking (status ${response.status})`);
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);
   }
@@ -184,7 +197,20 @@ export async function restockProduct(id: string, amount: number, currentStock: n
 export async function addExpense(expense: Expense): Promise<void> {
   const path = `expenses/${expense.id}`;
   try {
-    await setDoc(doc(db, 'expenses', expense.id), expense);
+    const idToken = await auth.currentUser?.getIdToken();
+    const { id, ...body } = expense as any;
+    const response = await fetch('/api/expenses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {})
+      },
+      body: JSON.stringify(body)
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || `Failed to log expense (status ${response.status})`);
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);
   }

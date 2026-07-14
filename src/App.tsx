@@ -3,6 +3,7 @@ import { Menu } from 'lucide-react';
 import { onAuthStateChanged } from './lib/authClient';
 import { doc, getDoc, collection, getDocs, deleteDoc, onSnapshot } from './lib/firestoreClient';
 import { auth, db } from './lib/firebase';
+import { persistSheetsSyncToServer } from './lib/sheetsPersist';
 import { 
   User, 
   Branch, 
@@ -754,6 +755,13 @@ export default function App() {
                 if (data.users && data.users.length > 0) {
                   setUsersList(data.users);
                 }
+                // The sync engine only reconciles React state above - it
+                // never touches the database. Persist the reconciled data
+                // to MongoDB so a Sheets edit actually sticks (survives a
+                // refresh, and is visible to every other logged-in user).
+                persistSheetsSyncToServer(data).catch((err) => {
+                  console.error('Failed to persist Google Sheets sync to the database:', err);
+                });
               }}
               currentUser={user}
             />

@@ -11,7 +11,7 @@ const ALL_ROLES: Role[] = ["HKA_MANAGEMENT", "SALON_MANAGER", "THERAPIST"];
  * only change through dedicated, audited flows (register/reset-password
  * controllers, checkout/payroll-run logic, etc).
  */
-export const PROTECTED_FIELDS: Record<string, string[]> = {
+const PROTECTED_FIELDS: Record<string, string[]> = {
   users: ["role", "branch", "passwordHash", "email", "forcePasswordChange"],
   therapists: ["currentSales", "totalCommissionEarned"],
 };
@@ -23,7 +23,28 @@ export const PROTECTED_FIELDS: Record<string, string[]> = {
  * HKA_MANAGEMENT, to prevent the accounting/audit trail from being
  * bypassed. Use a dedicated admin tool/script for manual corrections.
  */
-const WRITE_LOCKED_COLLECTIONS = new Set(["transactions", "attendance"]);
+const WRITE_LOCKED_COLLECTIONS = new Set([
+  "transactions",
+  "attendance",
+  "bookings",
+  "customers",
+  "therapists",
+  "products",
+  "services",
+  "expenses",
+  "payroll",
+  "settings",
+]);
+
+/**
+ * Narrow exemptions inside otherwise write-locked collections, for
+ * app-internal config unrelated to business data (e.g. the sync feature
+ * needs somewhere to store its own spreadsheet id / Apps Script URL before
+ * any sync has ever run).
+ */
+const WRITE_LOCK_EXEMPT_DOC_IDS: Record<string, Set<string>> = {
+  settings: new Set(["sheets_config"]),
+};
 
 interface CollectionPolicy {
   read: Role[] | "all";
@@ -92,9 +113,16 @@ export function authorizeCollectionAccess(action: "read" | "write") {
       // Real-world writes to these collections must go through their
       // dedicated, transactional, audited endpoints - never the generic API.
       if (WRITE_LOCKED_COLLECTIONS.has(collection)) {
-        return res.status(403).json({
-          error: `Forbidden: "${collection}" cannot be modified directly. Use the dedicated endpoint for this action.`,
-        });
+        const exemptIds = WRITE_LOCK_EXEMPT_DOC_IDS[collection];
+        const isExempt = exemptIds && req.params.id && exemptIds.has(req.params.id);
+        if (!isExempt) {
+          return res.status(403).json({
+            error:
+              `Forbidden: "${collection}" is managed through Google Sheets and can no longer be edited directly in the app. ` +
+              `Update the record in the connected spreadsheet instead - changes sync automatically. ` +
+              `(New records from checkout / clock in-out / bookings / expenses are still created by the app and pushed to the sheet.)`,
+          });
+        }
       }
 
       const isSelfScoped = policy.selfScopedFor?.includes(role);
