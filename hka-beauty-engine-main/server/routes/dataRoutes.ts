@@ -9,6 +9,13 @@ import {
 } from "../controllers/dataController";
 import { requireAuthWithProfile } from "../middleware/auth";
 import { authorizeCollectionAccess } from "../middleware/authorize";
+import {
+  validateDataIdParam,
+  validateDataListQuery,
+  validateDataCreateBody,
+  validateDataUpdateBody,
+  validateDataBatchBody,
+} from "../middleware/validateDataCollection";
 
 const router = Router({ mergeParams: true });
 
@@ -16,12 +23,33 @@ const router = Router({ mergeParams: true });
 // critical gap where any valid token could read/write any collection).
 router.use(requireAuthWithProfile);
 
-router.get("/:collection", authorizeCollectionAccess("read"), listDocuments);
-router.get("/:collection/:id", authorizeCollectionAccess("read"), getDocument);
+// Validation runs AFTER authorization (so an unauthorized caller gets 403
+// before any 400 about payload shape) and only adds a schema check for
+// "customers", "bookings", "products", "services" -- every other collection
+// keeps behaving exactly as before.
+router.get("/:collection", authorizeCollectionAccess("read"), validateDataListQuery, listDocuments);
+router.get("/:collection/:id", authorizeCollectionAccess("read"), validateDataIdParam, getDocument);
 
-router.post("/:collection/_batch", authorizeCollectionAccess("write"), batchSetDocuments);
-router.put("/:collection/:id", authorizeCollectionAccess("write"), setDocument);
-router.patch("/:collection/:id", authorizeCollectionAccess("write"), updateDocument);
-router.delete("/:collection/:id", authorizeCollectionAccess("write"), deleteDocument);
+router.post(
+  "/:collection/_batch",
+  authorizeCollectionAccess("write"),
+  validateDataBatchBody,
+  batchSetDocuments
+);
+router.put(
+  "/:collection/:id",
+  authorizeCollectionAccess("write"),
+  validateDataIdParam,
+  validateDataCreateBody,
+  setDocument
+);
+router.patch(
+  "/:collection/:id",
+  authorizeCollectionAccess("write"),
+  validateDataIdParam,
+  validateDataUpdateBody,
+  updateDocument
+);
+router.delete("/:collection/:id", authorizeCollectionAccess("write"), validateDataIdParam, deleteDocument);
 
 export default router;
