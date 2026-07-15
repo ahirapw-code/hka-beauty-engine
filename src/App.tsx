@@ -3,7 +3,6 @@ import { Menu } from 'lucide-react';
 import { onAuthStateChanged } from './lib/authClient';
 import { doc, getDoc, collection, getDocs, deleteDoc, onSnapshot } from './lib/firestoreClient';
 import { auth, db } from './lib/firebase';
-import { persistSheetsSyncToServer } from './lib/sheetsPersist';
 import { 
   User, 
   Branch, 
@@ -149,6 +148,20 @@ export default function App() {
     return saved ? JSON.parse(saved) : INITIAL_SERVICES;
   });
 
+  // Tracks which collections have received at least one real response from
+  // MongoDB. `customers`/`bookings`/etc above start out holding whatever was
+  // in localStorage or, failing that, the hardcoded INITIAL_* mock arrays -
+  // that's fine for painting the UI instantly, but Google Sheets sync must
+  // never run against those placeholder values, or it will push mock data
+  // into the spreadsheet and stomp on real edits. `dataReady` only flips to
+  // true once every collection below has reported back for real.
+  const [loadedCollections, setLoadedCollections] = useState<Set<string>>(new Set());
+  const REQUIRED_COLLECTIONS = ['customers', 'bookings', 'transactions', 'therapists', 'products', 'services', 'expenses', 'attendance'];
+  const dataReady = REQUIRED_COLLECTIONS.every(c => loadedCollections.has(c));
+  const markLoaded = (name: string) => {
+    setLoadedCollections(prev => (prev.has(name) ? prev : new Set(prev).add(name)));
+  };
+
   // Real-time synchronization of all business states with Firestore on mount/auth change
   useEffect(() => {
     if (!user) return;
@@ -171,6 +184,7 @@ export default function App() {
       snapshot.forEach(doc => {
         list.push(doc.data() as Customer);
       });
+      markLoaded('customers');
       if (list.length > 0) {
         setCustomers(list);
         localStorage.setItem('hka_customers', JSON.stringify(list));
@@ -185,6 +199,7 @@ export default function App() {
       snapshot.forEach(doc => {
         list.push(doc.data() as Booking);
       });
+      markLoaded('bookings');
       if (list.length > 0) {
         setBookings(list);
         localStorage.setItem('hka_bookings', JSON.stringify(list));
@@ -199,6 +214,7 @@ export default function App() {
       snapshot.forEach(doc => {
         list.push(doc.data() as Transaction);
       });
+      markLoaded('transactions');
       if (list.length > 0) {
         // Sort descending by transaction date
         const sorted = list.sort((a, b) => b.date.localeCompare(a.date));
@@ -215,6 +231,7 @@ export default function App() {
       snapshot.forEach(doc => {
         list.push(doc.data() as Therapist);
       });
+      markLoaded('therapists');
       if (list.length > 0) {
         setTherapists(list);
         localStorage.setItem('hka_therapists', JSON.stringify(list));
@@ -229,6 +246,7 @@ export default function App() {
       snapshot.forEach(doc => {
         list.push(doc.data() as Product);
       });
+      markLoaded('products');
       if (list.length > 0) {
         setProducts(list);
         localStorage.setItem('hka_products', JSON.stringify(list));
@@ -243,6 +261,7 @@ export default function App() {
       snapshot.forEach(doc => {
         list.push(doc.data() as Expense);
       });
+      markLoaded('expenses');
       if (list.length > 0) {
         setExpenses(list);
         localStorage.setItem('hka_expenses', JSON.stringify(list));
@@ -257,6 +276,7 @@ export default function App() {
       snapshot.forEach(doc => {
         list.push(doc.data() as Attendance);
       });
+      markLoaded('attendance');
       if (list.length > 0) {
         setAttendance(list);
         localStorage.setItem('hka_attendance', JSON.stringify(list));
@@ -271,6 +291,7 @@ export default function App() {
       snapshot.forEach(doc => {
         list.push(doc.data() as Service);
       });
+      markLoaded('services');
       if (list.length > 0) {
         setServices(list);
         localStorage.setItem('hka_services', JSON.stringify(list));
@@ -757,15 +778,9 @@ export default function App() {
                 if (data.users && data.users.length > 0) {
                   setUsersList(data.users);
                 }
-                // The sync engine only reconciles React state above - it
-                // never touches the database. Persist the reconciled data
-                // to MongoDB so a Sheets edit actually sticks (survives a
-                // refresh, and is visible to every other logged-in user).
-                persistSheetsSyncToServer(data).catch((err) => {
-                  console.error('Failed to persist Google Sheets sync to the database:', err);
-                });
               }}
               currentUser={user}
+              dataReady={dataReady}
             />
             <span className="text-xs text-slate-500 font-mono bg-slate-50 border border-slate-100 px-3 py-1 rounded-full hidden sm:inline-block">
               System Time: 19:07 UTC
