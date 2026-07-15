@@ -23,6 +23,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { doc, onSnapshot, setDoc } from '../lib/firestoreClient';
 import { db, auth } from '../lib/firebase';
+import { persistSheetsSyncToServer } from '../lib/sheetsPersist';
 
 interface GoogleSheetsSyncProps {
   customers: Customer[];
@@ -291,6 +292,20 @@ export default function GoogleSheetsSync({
       const timeString = new Date().toLocaleTimeString();
       setLastSynced(timeString);
       localStorage.setItem('hka_sheets_last_synced', timeString);
+
+      // Persist the reconciled dataset to MongoDB. Without this, the merge
+      // above only lives in React state - a refresh (or anyone else's
+      // session) would keep seeing whatever was already in the database,
+      // which looks like Sheets edits "reverting" to old/mock data.
+      try {
+        await persistSheetsSyncToServer(result.updatedLocalData);
+      } catch (persistErr: any) {
+        console.error('Error persisting Sheets sync to database:', persistErr);
+        setConflictLogs(prev => [
+          ...prev,
+          `Gagal menyimpan hasil sync ke database: ${persistErr.message || persistErr}`,
+        ]);
+      }
 
       // Trigger backend payroll (salary and commission rate) sync from Sheets to Firestore
       try {
