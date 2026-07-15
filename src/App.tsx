@@ -741,6 +741,7 @@ export default function App() {
               transactions={transactions}
               therapists={therapists}
               products={products}
+              services={services}
               expenses={expenses}
               attendance={attendance}
               users={usersList}
@@ -750,6 +751,7 @@ export default function App() {
                 setTransactions(data.transactions);
                 setTherapists(data.therapists);
                 setProducts(data.products);
+                setServices(data.services);
                 setExpenses(data.expenses);
                 setAttendance(data.attendance);
                 if (data.users && data.users.length > 0) {

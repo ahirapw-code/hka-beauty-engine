@@ -1,5 +1,5 @@
 import { auth } from './firebase';
-import { Customer, Booking, Transaction, Therapist, Product, Expense, Attendance } from '../types';
+import { Customer, Booking, Transaction, Therapist, Product, Service, Expense, Attendance } from '../types';
 
 /**
  * Sends the reconciled dataset produced by syncStateToSpreadsheetIncremental
@@ -15,6 +15,7 @@ export async function persistSheetsSyncToServer(data: {
   transactions: Transaction[];
   therapists: Therapist[];
   products: Product[];
+  services: Service[];
   expenses: Expense[];
   attendance: Attendance[];
 }): Promise<void> {
@@ -33,6 +34,7 @@ export async function persistSheetsSyncToServer(data: {
       transactions: data.transactions,
       therapists: data.therapists,
       products: data.products,
+      services: data.services,
       expenses: data.expenses,
       attendance: data.attendance,
     }),

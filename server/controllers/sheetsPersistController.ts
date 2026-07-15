@@ -6,6 +6,7 @@ import Booking from "../models/Booking.js";
 import Transaction from "../models/Transaction.js";
 import Therapist from "../models/Therapist.js";
 import Product from "../models/Product.js";
+import Service from "../models/Service.js";
 import Expense from "../models/Expense.js";
 import Attendance from "../models/Attendance.js";
 
@@ -68,7 +69,7 @@ export async function persistSheetsSync(req: Request, res: Response) {
       });
     }
 
-    const { customers, bookings, transactions, therapists, products, expenses, attendance } =
+    const { customers, bookings, transactions, therapists, products, services, expenses, attendance } =
       req.body || {};
 
     const written = {
@@ -77,6 +78,7 @@ export async function persistSheetsSync(req: Request, res: Response) {
       transactions: await upsertRows(Transaction, transactions),
       therapists: await upsertRows(Therapist, therapists),
       products: await upsertRows(Product, products),
+      services: await upsertRows(Service, services),
       expenses: await upsertRows(Expense, expenses),
       attendance: await upsertRows(Attendance, attendance),
     };

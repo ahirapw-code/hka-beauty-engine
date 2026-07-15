@@ -6,7 +6,7 @@ import {
   syncStateToSpreadsheetIncremental,
   initAuth
 } from '../lib/googleSheets';
-import { Customer, Booking, Transaction, Therapist, Product, Expense, Attendance, User } from '../types';
+import { Customer, Booking, Transaction, Therapist, Product, Service, Expense, Attendance, User } from '../types';
 import { 
   Database, 
   CloudLightning, 
@@ -30,6 +30,7 @@ interface GoogleSheetsSyncProps {
   transactions: Transaction[];
   therapists: Therapist[];
   products: Product[];
+  services: Service[];
   expenses: Expense[];
   attendance: Attendance[];
   users: User[];
@@ -39,6 +40,7 @@ interface GoogleSheetsSyncProps {
     transactions: Transaction[];
     therapists: Therapist[];
     products: Product[];
+    services: Service[];
     expenses: Expense[];
     attendance: Attendance[];
     users: User[];
@@ -145,6 +147,7 @@ export default function GoogleSheetsSync({
   transactions,
   therapists,
   products,
+  services,
   expenses,
   attendance,
   users,
@@ -252,7 +255,7 @@ export default function GoogleSheetsSync({
       const result = await syncStateToSpreadsheetIncremental(
         spreadsheetId,
         token,
-        { customers, bookings, transactions, therapists, products, expenses, attendance, users },
+        { customers, bookings, transactions, therapists, products, services, expenses, attendance, users },
         appsScriptUrl
       );
 
@@ -331,7 +334,7 @@ export default function GoogleSheetsSync({
     }, 30000);
 
     return () => clearInterval(interval);
-  }, [spreadsheetId, token, appsScriptUrl, autoSync, customers, bookings, transactions, therapists, products, expenses, attendance, users]);
+  }, [spreadsheetId, token, appsScriptUrl, autoSync, customers, bookings, transactions, therapists, products, services, expenses, attendance, users]);
 
   // Google Authentication popup
   const handleLogin = async () => {
@@ -376,7 +379,7 @@ export default function GoogleSheetsSync({
     setSyncStatus('syncing');
     try {
       const id = await findOrCreateDatabase(accessToken, {
-        customers, bookings, transactions, therapists, products, expenses, attendance, users
+        customers, bookings, transactions, therapists, products, services, expenses, attendance, users
       });
       setSpreadsheetId(id);
       localStorage.setItem('hka_sheets_spreadsheet_id', id);

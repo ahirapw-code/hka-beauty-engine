@@ -1,4 +1,4 @@
-import { Customer, Booking, Transaction, Therapist, Product, Expense, Attendance, User } from '../types';
+import { Customer, Booking, Transaction, Therapist, Product, Service, Expense, Attendance, User } from '../types';
 
 // --- Google Identity Services (GIS) OAuth for Sheets/Drive scopes ---
 //
@@ -169,7 +169,7 @@ export const ensureSheetsExist = async (spreadsheetId: string, accessToken: stri
     const spreadsheet = await getRes.json();
     const existingTitles = (spreadsheet.sheets || []).map((s: any) => s.properties.title);
     
-    const requiredTitles = ['Customers', 'Bookings', 'Transactions', 'Therapists', 'Products', 'Expenses', 'Attendance', 'Users'];
+    const requiredTitles = ['Customers', 'Bookings', 'Transactions', 'Therapists', 'Products', 'Services', 'Expenses', 'Attendance', 'Users'];
     const missingTitles = requiredTitles.filter(t => !existingTitles.includes(t));
     
     if (missingTitles.length > 0) {
@@ -202,6 +202,7 @@ export const findOrCreateDatabase = async (
     transactions: Transaction[];
     therapists: Therapist[];
     products: Product[];
+    services: Service[];
     expenses: Expense[];
     attendance: Attendance[];
     users: User[];
@@ -237,6 +238,7 @@ export const findOrCreateDatabase = async (
         { properties: { title: 'Transactions' } },
         { properties: { title: 'Therapists' } },
         { properties: { title: 'Products' } },
+        { properties: { title: 'Services' } },
         { properties: { title: 'Expenses' } },
         { properties: { title: 'Attendance' } },
         { properties: { title: 'Users' } },
@@ -265,6 +267,7 @@ export const writeAllDataToSpreadsheet = async (
     transactions: Transaction[];
     therapists: Therapist[];
     products: Product[];
+    services: Service[];
     expenses: Expense[];
     attendance: Attendance[];
     users: User[];
@@ -306,6 +309,13 @@ export const writeAllDataToSpreadsheet = async (
       values: [
         ['id', 'name', 'sku', 'price', 'cost', 'stock', 'minStock', 'branch', 'category'],
         ...data.products.map(p => [p.id, p.name, p.sku, p.price, p.cost, p.stock, p.minStock, p.branch, p.category])
+      ]
+    },
+    {
+      range: 'Services!A1:F',
+      values: [
+        ['id', 'name', 'category', 'price', 'duration', 'branches'],
+        ...data.services.map(s => [s.id, s.name, s.category, s.price, s.duration, s.branches.join(',')])
       ]
     },
     {
@@ -352,7 +362,7 @@ export const writeAllDataToSpreadsheet = async (
 export const readAllDataFromSpreadsheet = async (spreadsheetId: string, accessToken: string) => {
   await ensureSheetsExist(spreadsheetId, accessToken);
 
-  const ranges = ['Customers!A1:I', 'Bookings!A1:N', 'Transactions!A1:J', 'Therapists!A1:J', 'Products!A1:I', 'Expenses!A1:F', 'Attendance!A1:J', 'Users!A1:G'];
+  const ranges = ['Customers!A1:I', 'Bookings!A1:N', 'Transactions!A1:J', 'Therapists!A1:J', 'Products!A1:I', 'Services!A1:F', 'Expenses!A1:F', 'Attendance!A1:J', 'Users!A1:G'];
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?ranges=${ranges.join('&ranges=')}`;
   const res = await fetchWithRetry(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
@@ -364,7 +374,7 @@ export const readAllDataFromSpreadsheet = async (spreadsheetId: string, accessTo
 
   const result = await res.json();
   const valueRanges = result.valueRanges;
-  const data: any = { customers: [], bookings: [], transactions: [], therapists: [], products: [], expenses: [], attendance: [], users: [] };
+  const data: any = { customers: [], bookings: [], transactions: [], therapists: [], products: [], services: [], expenses: [], attendance: [], users: [] };
 
   valueRanges.forEach((rangeObj: any) => {
     const rangeName = rangeObj.range;
@@ -394,6 +404,7 @@ export interface SyncResult {
     transactions: Transaction[];
     therapists: Therapist[];
     products: Product[];
+    services: Service[];
     expenses: Expense[];
     attendance: Attendance[];
     users: User[];
@@ -415,6 +426,8 @@ export const recordToRow = (sheetName: string, item: any): any[] => {
       return [item.id, item.name, item.branch, item.specialties.join(','), String(item.rating), String(item.commissionRate), String(item.totalCommissionEarned), item.status, String(item.monthlyTarget || 5000), String(item.currentSales || 0), String(item.baseSalary || 0)];
     case 'Products':
       return [item.id, item.name, item.sku, String(item.price), String(item.cost), String(item.stock), String(item.minStock), item.branch, item.category];
+    case 'Services':
+      return [item.id, item.name, item.category, String(item.price), String(item.duration), (item.branches || []).join(',')];
     case 'Expenses':
       return [item.id, item.branch, item.category, String(item.amount), item.date, item.description];
     case 'Attendance':
@@ -434,7 +447,7 @@ export const parseRawSheetValues = (sheetName: string, headers: string[], rows: 
       const val = row[i];
       if (['totalSpend', 'visitsCount', 'price', 'duration', 'subtotal', 'discount', 'total', 'rating', 'commissionRate', 'totalCommissionEarned', 'monthlyTarget', 'currentSales', 'cost', 'stock', 'minStock', 'amount', 'baseSalary'].includes(header)) {
         obj[header] = Number(val) || 0;
-      } else if (header === 'specialties') {
+      } else if (header === 'specialties' || header === 'branches') {
         obj[header] = val ? val.split(',') : [];
       } else if (header === 'items_json') {
         try {
@@ -472,6 +485,7 @@ export const syncStateToSpreadsheetIncremental = async (
     transactions: Transaction[];
     therapists: Therapist[];
     products: Product[];
+    services: Service[];
     expenses: Expense[];
     attendance: Attendance[];
     users: User[];
@@ -498,7 +512,7 @@ export const syncStateToSpreadsheetIncremental = async (
     remoteDataRaw = json.data;
   } else {
     if (!accessToken) throw new Error('SESSION_EXPIRED');
-    const ranges = ['Customers!A1:I', 'Bookings!A1:N', 'Transactions!A1:J', 'Therapists!A1:K', 'Products!A1:I', 'Expenses!A1:F', 'Attendance!A1:J', 'Users!A1:G'];
+    const ranges = ['Customers!A1:I', 'Bookings!A1:N', 'Transactions!A1:J', 'Therapists!A1:K', 'Products!A1:I', 'Services!A1:F', 'Expenses!A1:F', 'Attendance!A1:J', 'Users!A1:G'];
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?ranges=${ranges.join('&ranges=')}`;
     const res = await fetchWithRetry(url, {
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -522,7 +536,7 @@ export const syncStateToSpreadsheetIncremental = async (
   const lastSyncedRawStr = localStorage.getItem('hka_sheets_last_synced_data');
   const lastSyncedRaw = lastSyncedRawStr ? JSON.parse(lastSyncedRawStr) : {};
 
-  const sheetNames = ['Customers', 'Bookings', 'Transactions', 'Therapists', 'Products', 'Expenses', 'Attendance', 'Users'];
+  const sheetNames = ['Customers', 'Bookings', 'Transactions', 'Therapists', 'Products', 'Services', 'Expenses', 'Attendance', 'Users'];
   const updatesToPush: { sheet: string; range: string; values: any[][] }[] = [];
   const appendsToPush: { [sheetName: string]: any[][] } = {};
   
@@ -532,6 +546,7 @@ export const syncStateToSpreadsheetIncremental = async (
     transactions: [...localData.transactions],
     therapists: [...localData.therapists],
     products: [...localData.products],
+    services: [...localData.services],
     expenses: [...localData.expenses],
     attendance: [...localData.attendance],
     users: [...localData.users]
@@ -567,6 +582,7 @@ export const syncStateToSpreadsheetIncremental = async (
     else if (sheetName === 'Transactions') { localRecords = localData.transactions; setLocalRecords = (it) => { updatedLocalData.transactions = it; }; lastCol = 'J'; }
     else if (sheetName === 'Therapists') { localRecords = localData.therapists; setLocalRecords = (it) => { updatedLocalData.therapists = it; }; lastCol = 'K'; }
     else if (sheetName === 'Products') { localRecords = localData.products; setLocalRecords = (it) => { updatedLocalData.products = it; }; lastCol = 'I'; }
+    else if (sheetName === 'Services') { localRecords = localData.services; setLocalRecords = (it) => { updatedLocalData.services = it; }; lastCol = 'F'; }
     else if (sheetName === 'Expenses') { localRecords = localData.expenses; setLocalRecords = (it) => { updatedLocalData.expenses = it; }; lastCol = 'F'; }
     else if (sheetName === 'Attendance') { localRecords = localData.attendance; setLocalRecords = (it) => { updatedLocalData.attendance = it; }; lastCol = 'J'; }
     else if (sheetName === 'Users') { localRecords = localData.users; setLocalRecords = (it) => { updatedLocalData.users = it; }; lastCol = 'G'; }
@@ -651,6 +667,7 @@ export const syncStateToSpreadsheetIncremental = async (
       else if (sheetName === 'Transactions') { lastCol = 'J'; headers = ['id', 'date', 'customerName', 'branch', 'subtotal', 'discount', 'total', 'paymentMethod', 'cashierName', 'items_json']; }
       else if (sheetName === 'Therapists') { lastCol = 'K'; headers = ['id', 'name', 'branch', 'specialties', 'rating', 'commissionRate', 'totalCommissionEarned', 'status', 'monthlyTarget', 'currentSales', 'baseSalary']; }
       else if (sheetName === 'Products') { lastCol = 'I'; headers = ['id', 'name', 'sku', 'price', 'cost', 'stock', 'minStock', 'branch', 'category']; }
+      else if (sheetName === 'Services') { lastCol = 'F'; headers = ['id', 'name', 'category', 'price', 'duration', 'branches']; }
       else if (sheetName === 'Expenses') { lastCol = 'F'; headers = ['id', 'branch', 'category', 'amount', 'date', 'description']; }
       else if (sheetName === 'Attendance') { lastCol = 'J'; headers = ['id', 'userId', 'userName', 'role', 'branch', 'date', 'clockIn', 'clockOut', 'status', 'notes']; }
       else if (sheetName === 'Users') { lastCol = 'G'; headers = ['id', 'username', 'name', 'role', 'branch', 'email', 'avatar']; }
