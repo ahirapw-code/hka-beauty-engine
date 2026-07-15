@@ -128,6 +128,8 @@ export default function GoogleSheetsSync({
   const [isCopied, setIsCopied] = useState(false);
   const [isSavingUrl, setIsSavingUrl] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
+  const [spreadsheetIdInput, setSpreadsheetIdInput] = useState(spreadsheetId || '');
+  const [isSavingSpreadsheetId, setIsSavingSpreadsheetId] = useState(false);
 
   const isHQManagement = currentUser?.role === 'HKA_MANAGEMENT';
   const isSyncingRef = useRef(false);
@@ -361,6 +363,26 @@ export default function GoogleSheetsSync({
     }
   };
 
+  // Save a manually-created Spreadsheet ID (no Google Sign-In / Cloud Console needed)
+  const handleSaveSpreadsheetId = async () => {
+    const id = spreadsheetIdInput.trim();
+    if (!id) return;
+    setIsSavingSpreadsheetId(true);
+    try {
+      await setDoc(doc(db, 'settings', 'sheets_config'), {
+        spreadsheetId: id
+      }, { merge: true });
+
+      setSpreadsheetId(id);
+      localStorage.setItem('hka_sheets_spreadsheet_id', id);
+    } catch (error: any) {
+      console.error(error);
+      setErrorMessage('Gagal menyimpan Spreadsheet ID.');
+    } finally {
+      setIsSavingSpreadsheetId(false);
+    }
+  };
+
   const handleCopyCode = () => {
     navigator.clipboard.writeText(APPS_SCRIPT_CODE);
     setIsCopied(true);
@@ -473,6 +495,42 @@ export default function GoogleSheetsSync({
                         </svg>
                         <span className="text-xs font-semibold text-slate-700">Hubungkan Akun Google</span>
                       </button>
+
+                      <div className="flex items-center gap-2">
+                        <div className="h-px bg-slate-100 flex-1" />
+                        <span className="text-[9px] text-slate-400 font-mono uppercase">atau, tanpa Google Cloud</span>
+                        <div className="h-px bg-slate-100 flex-1" />
+                      </div>
+
+                      <div className="bg-emerald-50/50 border border-emerald-100/50 rounded-xl p-3 space-y-2">
+                        <span className="text-[10px] font-bold text-emerald-800 flex items-center gap-1 font-mono uppercase">
+                          <Sparkles className="w-3 h-3 text-emerald-500" /> Setup Gratis (tanpa OAuth/Cloud Console):
+                        </span>
+                        <ol className="text-[9px] text-slate-600 space-y-1 list-decimal pl-3.5 leading-normal">
+                          <li>Buka <strong>sheets.new</strong> untuk membuat spreadsheet kosong (gratis, akun Google biasa).</li>
+                          <li>Salin ID dari URL-nya - bagian panjang di antara <span className="font-mono">/d/</span> dan <span className="font-mono">/edit</span>.</li>
+                          <li>Tempel ID tersebut di bawah ini dan klik Save.</li>
+                        </ol>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            placeholder="Spreadsheet ID"
+                            value={spreadsheetIdInput}
+                            onChange={(e) => setSpreadsheetIdInput(e.target.value)}
+                            className="flex-1 text-[11px] font-mono px-3 py-1.5 border border-slate-200 rounded-xl focus:border-[#D4AF37] focus:outline-none bg-white"
+                          />
+                          <button
+                            onClick={handleSaveSpreadsheetId}
+                            disabled={isSavingSpreadsheetId || !spreadsheetIdInput.trim()}
+                            className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs rounded-xl cursor-pointer transition-colors"
+                          >
+                            {isSavingSpreadsheetId ? 'Saving...' : 'Save'}
+                          </button>
+                        </div>
+                        <p className="text-[9px] text-slate-400 leading-relaxed">
+                          Setelah tersimpan, langkah berikutnya (setup Apps Script) akan muncul di bawah - juga tidak perlu Google Cloud Console.
+                        </p>
+                      </div>
                     </div>
                   )}
 
