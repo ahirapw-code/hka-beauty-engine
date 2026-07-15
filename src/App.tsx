@@ -87,20 +87,29 @@ export default function App() {
   const [selectedBranch, setSelectedBranch] = useState<Branch>('ALL');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-  // Business state engines loaded from localStorage initially as temporary/offline cache
+  // Business state engines loaded from localStorage initially as temporary/offline cache.
+  // IMPORTANT: fallback is an empty array, NOT the INITIAL_*/PRESET_* mock
+  // constants. Those mock arrays are only for seedDatabaseIfEmpty (writing
+  // starter data into a brand-new, empty MongoDB). If they were used here
+  // too, then on any browser/session without a localStorage cache yet, the
+  // Sheets sync engine would treat every mock record as a "new local
+  // record" (their ids don't exist in the real, since-edited spreadsheet)
+  // and append the entire mock dataset back into the spreadsheet as bogus
+  // new rows. An empty array is safe here: the sync engine just defers
+  // entirely to the spreadsheet/MongoDB until the real data has loaded.
   const [customers, setCustomers] = useState<Customer[]>(() => {
     const saved = localStorage.getItem('hka_customers');
-    return saved ? JSON.parse(saved) : INITIAL_CUSTOMERS;
+    return saved ? JSON.parse(saved) : [];
   });
 
   const [bookings, setBookings] = useState<Booking[]>(() => {
     const saved = localStorage.getItem('hka_bookings');
-    return saved ? JSON.parse(saved) : INITIAL_BOOKINGS;
+    return saved ? JSON.parse(saved) : [];
   });
 
   const [transactions, setTransactions] = useState<Transaction[]>(() => {
     const saved = localStorage.getItem('hka_transactions');
-    return saved ? JSON.parse(saved) : INITIAL_TRANSACTIONS;
+    return saved ? JSON.parse(saved) : [];
   });
 
   const [therapists, setTherapists] = useState<Therapist[]>(() => {
@@ -117,44 +126,41 @@ export default function App() {
           };
         });
       } catch (e) {
-        return INITIAL_THERAPISTS;
+        return [];
       }
     }
-    return INITIAL_THERAPISTS;
+    return [];
   });
 
   const [products, setProducts] = useState<Product[]>(() => {
     const saved = localStorage.getItem('hka_products');
-    return saved ? JSON.parse(saved) : INITIAL_PRODUCTS;
+    return saved ? JSON.parse(saved) : [];
   });
 
   const [expenses, setExpenses] = useState<Expense[]>(() => {
     const saved = localStorage.getItem('hka_expenses');
-    return saved ? JSON.parse(saved) : INITIAL_EXPENSES;
+    return saved ? JSON.parse(saved) : [];
   });
 
   const [attendance, setAttendance] = useState<Attendance[]>(() => {
     const saved = localStorage.getItem('hka_attendance');
-    return saved ? JSON.parse(saved) : INITIAL_ATTENDANCE;
+    return saved ? JSON.parse(saved) : [];
   });
 
   const [usersList, setUsersList] = useState<User[]>(() => {
     const saved = localStorage.getItem('hka_users_list');
-    return saved ? JSON.parse(saved) : PRESET_USERS;
+    return saved ? JSON.parse(saved) : [];
   });
 
   const [services, setServices] = useState<Service[]>(() => {
     const saved = localStorage.getItem('hka_services');
-    return saved ? JSON.parse(saved) : INITIAL_SERVICES;
+    return saved ? JSON.parse(saved) : [];
   });
 
   // Tracks which collections have received at least one real response from
-  // MongoDB. `customers`/`bookings`/etc above start out holding whatever was
-  // in localStorage or, failing that, the hardcoded INITIAL_* mock arrays -
-  // that's fine for painting the UI instantly, but Google Sheets sync must
-  // never run against those placeholder values, or it will push mock data
-  // into the spreadsheet and stomp on real edits. `dataReady` only flips to
-  // true once every collection below has reported back for real.
+  // MongoDB. Kept as a second line of defense on top of the empty-array
+  // fallback above: Sheets sync should still wait for real data rather than
+  // running against a transient empty/partial state right at mount.
   const [loadedCollections, setLoadedCollections] = useState<Set<string>>(new Set());
   const REQUIRED_COLLECTIONS = ['customers', 'bookings', 'transactions', 'therapists', 'products', 'services', 'expenses', 'attendance'];
   const dataReady = REQUIRED_COLLECTIONS.every(c => loadedCollections.has(c));
