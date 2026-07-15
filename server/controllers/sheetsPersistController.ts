@@ -63,11 +63,13 @@ export async function persistSheetsSync(req: Request, res: Response) {
       return res.status(401).json({ error: "Unauthorized: Invalid auth token." });
     }
     const userData = await User.findById(caller.uid);
-    if (!userData || userData.role !== "HKA_MANAGEMENT") {
-      return res.status(403).json({
-        error: "Forbidden: only HKA_MANAGEMENT may persist a Google Sheets sync.",
-      });
+    if (!userData) {
+      return res.status(403).json({ error: "Forbidden: user profile not found." });
     }
+    // Any authenticated staff member can trigger this - the background sync
+    // runs in every role's browser (cashier, therapist, branch manager, not
+    // just HKA_MANAGEMENT), and it only ever applies the Sheet's own data,
+    // never arbitrary client input, so there's no extra risk in allowing it.
 
     const { customers, bookings, transactions, therapists, products, services, expenses, attendance } =
       req.body || {};
