@@ -48,9 +48,7 @@ interface GoogleSheetsSyncProps {
   }) => void;
   currentUser: User | null;
   /** True once every collection has loaded real data from MongoDB at least
-   * once. Auto-sync must wait for this - otherwise it runs against the
-   * localStorage/mock fallback values React state starts with, and pushes
-   * that placeholder data into the spreadsheet, overwriting real edits. */
+   * once. Auto-sync must wait for this. */
   dataReady: boolean;
 }
 
@@ -222,12 +220,8 @@ export default function GoogleSheetsSync({
   const isSyncingRef = useRef(false);
 
   // Always-fresh snapshot of the data props, read by handleIncrementalSync
-  // at call time. This lets the auto-sync effect below schedule itself off
-  // of (spreadsheetId, token, appsScriptUrl, autoSync, dataReady) only,
-  // instead of re-running (and re-firing an immediate sync) every single
-  // time any business record changes - which previously caused sync calls
-  // to fire back-to-back using whatever partial/stale data happened to be
-  // in scope at that instant.
+  // at call time, so the scheduling effect below doesn't need to restart
+  // (and re-fire an immediate sync) every time a business record changes.
   const latestDataRef = useRef({ customers, bookings, transactions, therapists, products, services, expenses, attendance, users });
   useEffect(() => {
     latestDataRef.current = { customers, bookings, transactions, therapists, products, services, expenses, attendance, users };
@@ -289,10 +283,8 @@ export default function GoogleSheetsSync({
       return;
     }
     if (!dataReady) {
-      // Real data from MongoDB hasn't finished loading yet - syncing now
-      // would read the localStorage/mock placeholder values and push them
-      // into the spreadsheet, overwriting real edits. Silently skip; the
-      // 30s interval or the next data change will retry once ready.
+      // Real data from MongoDB hasn't finished loading yet in this session.
+      // Skip rather than sync against an incomplete/empty state.
       if (!isBackground) {
         setErrorMessage('Data aplikasi masih dimuat, coba lagi sebentar.');
       }
@@ -323,8 +315,7 @@ export default function GoogleSheetsSync({
 
       // Persist the reconciled dataset to MongoDB. Without this, the merge
       // above only lives in React state - a refresh (or anyone else's
-      // session) would keep seeing whatever was already in the database,
-      // which looks like Sheets edits "reverting" to old/mock data.
+      // session) would keep seeing whatever was already in the database.
       try {
         await persistSheetsSyncToServer(result.updatedLocalData);
       } catch (persistErr: any) {
@@ -402,12 +393,10 @@ export default function GoogleSheetsSync({
     }, 30000);
 
     return () => clearInterval(interval);
-    // Deliberately NOT depending on customers/bookings/etc: this effect
-    // schedules *when* sync runs. Each scheduled run reads fresh data via
-    // latestDataRef at call time, so it doesn't need to restart every time
-    // a record changes - restarting on every change was firing a sync
-    // immediately with whatever partial state existed at that render,
-    // which is exactly what caused mock/stale data to get pushed to Sheets.
+    // Deliberately not depending on customers/bookings/etc - each scheduled
+    // run reads fresh data via latestDataRef at call time. Depending on
+    // those arrays here caused this effect to tear down and re-fire an
+    // immediate sync every single time any record changed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spreadsheetId, token, appsScriptUrl, autoSync, dataReady]);
 
