@@ -72,6 +72,12 @@ function ensureSheets(ss) {
     if (!sheet) {
       sheet = ss.insertSheet(name);
     }
+    // Force the whole data area to Plain Text. Without this, Sheets
+    // auto-detects strings like "17:00:00" or "2026-07-11 17:00:00" and
+    // silently converts the cell to a Date/Time type - which then reads
+    // back as a JS Date anchored at Sheets' 1899-12-30 epoch instead of
+    // the original text, breaking every subsequent sync comparison.
+    sheet.getRange(1, 1, Math.max(sheet.getMaxRows(), 1000), headers.length).setNumberFormat('@');
     if (sheet.getLastRow() === 0) {
       var range = sheet.getRange(1, 1, 1, headers.length);
       range.setValues([headers]);
@@ -85,6 +91,19 @@ function ensureSheets(ss) {
   if (defaultSheet && defaultSheet.getLastRow() === 0 && ss.getSheets().length > 1) {
     ss.deleteSheet(defaultSheet);
   }
+}
+
+// Converts any cell Sheets has already auto-converted to a Date object back
+// into plain text, using the same "yyyy-MM-dd HH:mm:ss" shape the app
+// writes, instead of letting JSON.stringify serialize it as an ISO string
+// anchored at the Sheets Date/Time epoch (1899-12-30).
+function normalizeRow(row) {
+  return row.map(function (cell) {
+    if (Object.prototype.toString.call(cell) === '[object Date]') {
+      return Utilities.formatDate(cell, Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss");
+    }
+    return cell;
+  });
 }
 
 // Visit YOUR_WEB_APP_URL?spreadsheetId=YOUR_ID in a browser any time to
@@ -114,7 +133,8 @@ function doPost(e) {
       var sheet = sheets[i];
       var name = sheet.getName();
       if (!SHEET_SCHEMAS[name]) continue;
-      result[name] = sheet.getDataRange().getValues();
+      var rawRows = sheet.getDataRange().getValues();
+      result[name] = rawRows.map(normalizeRow);
     }
     return ContentService.createTextOutput(JSON.stringify({ status: 'success', data: result }))
       .setMimeType(ContentService.MimeType.JSON);
@@ -130,6 +150,11 @@ function doPost(e) {
       if (rowMatch) {
         var rowNum = parseInt(rowMatch[0], 10);
         var range = sheet.getRange(rowNum, 1, u.values.length, u.values[0].length);
+        // Re-assert plain text on the exact cells being written - the
+        // sheet-wide pass in ensureSheets covers pre-existing rows, but a
+        // brand new row appended here needs it applied before setValues
+        // too, otherwise Sheets re-detects the type as it's written.
+        range.setNumberFormat('@');
         range.setValues(u.values);
       }
     }
