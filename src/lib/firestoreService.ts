@@ -3,6 +3,7 @@ import {
   doc, 
   setDoc, 
   updateDoc, 
+  getDoc,
   getDocs, 
   writeBatch 
 } from './firestoreClient';
@@ -285,6 +286,18 @@ export async function seedDatabaseIfEmpty(
   services: Service[]
 ): Promise<void> {
   try {
+    // A collection being empty does NOT mean "never seeded" - it might mean
+    // someone genuinely deleted everything on purpose (e.g. via the Google
+    // Sheets sync). Checking emptiness alone caused deleted data to get
+    // silently re-created with the original mock/demo dataset on the very
+    // next app load. A one-time persistent flag fixes this: seeding only
+    // ever runs once, the first time this app is used against a brand new
+    // database - never again after that, no matter how empty things get.
+    const seedStatusSnap = await getDoc(doc(db, 'settings', 'seed_status'));
+    if (seedStatusSnap.exists() && (seedStatusSnap.data() as any)?.seeded) {
+      return;
+    }
+
     // 0. Services
     const servicesSnap = await getDocs(collection(db, 'services'));
     if (servicesSnap.empty && services.length > 0) {
@@ -372,6 +385,14 @@ export async function seedDatabaseIfEmpty(
       await batch.commit();
       console.log('Successfully seeded attendance in Firestore.');
     }
+
+    // Mark this app instance as seeded - permanently. Even if every
+    // collection above turns out empty again in the future (deletions via
+    // Sheets, manual cleanup, etc), this will never run again.
+    await setDoc(doc(db, 'settings', 'seed_status'), {
+      seeded: true,
+      seededAt: new Date().toISOString()
+    }, { merge: true });
 
   } catch (error) {
     console.error('Error seeding database: ', error);

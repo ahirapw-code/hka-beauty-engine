@@ -43,7 +43,7 @@ const WRITE_LOCKED_COLLECTIONS = new Set([
  * any sync has ever run).
  */
 const WRITE_LOCK_EXEMPT_DOC_IDS: Record<string, Set<string>> = {
-  settings: new Set(["sheets_config"]),
+  settings: new Set(["sheets_config", "seed_status"]),
 };
 
 interface CollectionPolicy {
@@ -110,9 +110,16 @@ export function authorizeCollectionAccess(action: "read" | "write") {
     }
 
     if (action === "write") {
+      // The one-time seed route (`/:collection/_batch`) is exempt from the
+      // write-lock below: it can only ever insert when the collection is
+      // still completely empty (checked in batchSetDocuments) and is now
+      // additionally gated by a persistent settings/seed_status flag on the
+      // client, so it can never be used to bulk-overwrite real data.
+      const isBatchSeedRoute = req.path.endsWith("/_batch");
+
       // Real-world writes to these collections must go through their
       // dedicated, transactional, audited endpoints - never the generic API.
-      if (WRITE_LOCKED_COLLECTIONS.has(collection)) {
+      if (WRITE_LOCKED_COLLECTIONS.has(collection) && !isBatchSeedRoute) {
         const exemptIds = WRITE_LOCK_EXEMPT_DOC_IDS[collection];
         const isExempt = exemptIds && req.params.id && exemptIds.has(req.params.id);
         if (!isExempt) {
