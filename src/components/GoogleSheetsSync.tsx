@@ -317,7 +317,7 @@ export default function GoogleSheetsSync({
       // above only lives in React state - a refresh (or anyone else's
       // session) would keep seeing whatever was already in the database.
       try {
-        await persistSheetsSyncToServer(result.updatedLocalData);
+        await persistSheetsSyncToServer(result.updatedLocalData, result.deletedIds);
       } catch (persistErr: any) {
         console.error('Error persisting Sheets sync to database:', persistErr);
         setConflictLogs(prev => [

@@ -411,6 +411,7 @@ export interface SyncResult {
   };
   conflictLog: string[];
   pushedCount: number;
+  deletedIds: { [sheetName: string]: string[] };
 }
 
 // Map a business object to cell values array
@@ -539,6 +540,7 @@ export const syncStateToSpreadsheetIncremental = async (
   const sheetNames = ['Customers', 'Bookings', 'Transactions', 'Therapists', 'Products', 'Services', 'Expenses', 'Attendance', 'Users'];
   const updatesToPush: { sheet: string; range: string; values: any[][] }[] = [];
   const appendsToPush: { [sheetName: string]: any[][] } = {};
+  const deletedIds: { [sheetName: string]: string[] } = {};
   
   const updatedLocalData: any = {
     customers: [...localData.customers],
@@ -644,18 +646,23 @@ export const syncStateToSpreadsheetIncremental = async (
         }
       } else {
         if (lastSyncedRow) {
-          // This record existed in the Sheet before, but this particular
-          // read didn't return it (could be a genuine deletion, but could
-          // just as easily be a transient/partial read, a renamed tab, or
-          // a quota hiccup on the Apps Script side). Silently dropping it
-          // here is what caused data to "revert to mock data" after a
-          // sync - so we keep the record locally and re-push it to the
-          // sheet, instead of discarding it on a guess.
-          conflictLog.push(`Record ${id} tidak ditemukan di cloud saat sync - dipertahankan & dikirim ulang ke Sheet.`);
-          appendsToPush[sheetName].push(localRow);
-          pushedCount++;
-          nextLocalRecords.push(record);
-          newLastSyncedRaw[sheetName][id] = localRow;
+          if (headers.length === 0) {
+            // The read for this whole sheet came back with no header row -
+            // that means the read itself failed or hit the wrong tab, not
+            // that every row was deleted. Treating this as a mass-delete is
+            // exactly what caused data to "revert to mock data" before.
+            // Keep the record and let the next successful sync reconcile it.
+            conflictLog.push(`Sheet ${sheetName} gagal terbaca saat sync - data lokal dipertahankan, tidak dianggap terhapus.`);
+            nextLocalRecords.push(record);
+            newLastSyncedRaw[sheetName][id] = lastSyncedRow;
+          } else {
+            // The sheet read fine, and this specific row is genuinely gone -
+            // honor the deletion, both locally and (via deletedIds) in MongoDB.
+            conflictLog.push(`Record ${id} dihapus di Sheet - dihapus juga dari app.`);
+            deletedIds[sheetName] = deletedIds[sheetName] || [];
+            deletedIds[sheetName].push(id);
+            // Not pushed to nextLocalRecords, and no baseline kept - it's gone.
+          }
         } else {
           // New local record
           appendsToPush[sheetName].push(localRow);
@@ -738,6 +745,7 @@ export const syncStateToSpreadsheetIncremental = async (
   return {
     updatedLocalData,
     conflictLog,
-    pushedCount
+    pushedCount,
+    deletedIds
   };
 };

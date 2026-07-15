@@ -13,6 +13,18 @@ import Attendance from "../models/Attendance.js";
 /**
  * POST /api/sheets/persist
  *
+ * NOTE ON THE TWO SYNC ENDPOINTS: this endpoint and
+ * POST /api/syncSheetsToFirestore (server/controllers/googleSheetsController.ts)
+ * are not redundant - they cover different data:
+ *   - /api/sheets/persist  → the 8 main collections tracked by the
+ *     client-side sync engine (Customers, Bookings, Transactions,
+ *     Therapists, Products, Services, Expenses, Attendance).
+ *   - /api/syncSheetsToFirestore → payroll/commission-rate fields only,
+ *     which aren't part of that client-side engine yet. It's called right
+ *     after this one on every sync (see GoogleSheetsSync.tsx).
+ * If payroll ever gets added as a proper tab in the main sync engine, this
+ * split can be retired - until then, both are needed.
+ *
  * The frontend's Google Sheets sync engine (src/lib/googleSheets.ts,
  * syncStateToSpreadsheetIncremental) already reads the connected spreadsheet,
  * reconciles it against in-memory app state, and resolves conflicts in favor
@@ -22,11 +34,7 @@ import Attendance from "../models/Attendance.js";
  *
  * This endpoint is the missing other half: it takes that same reconciled
  * dataset and writes it into MongoDB, per-field ($set, not a full replace),
- * so a Sheets edit is durable and visible to everyone. This is the ONE path
- * allowed to write these collections outside of a dedicated business
- * controller (checkout/clockInOut/createBooking/createExpense/payroll run) -
- * enforced by requiring HKA_MANAGEMENT, since only the person managing the
- * spreadsheet should be able to trigger this.
+ * so a Sheets edit is durable and visible to everyone.
  *
  * Deliberately excluded here: `users`. Sheets can rename/reassign a
  * therapist or product, but it must never be able to touch passwordHash or
@@ -56,6 +64,12 @@ async function upsertRows(model: any, rows: Row[] | undefined) {
   return count;
 }
 
+async function deleteRows(model: any, ids: string[] | undefined) {
+  if (!Array.isArray(ids) || ids.length === 0) return 0;
+  const result = await model.deleteMany({ _id: { $in: ids } });
+  return result.deletedCount || 0;
+}
+
 export async function persistSheetsSync(req: Request, res: Response) {
   try {
     const caller = await verifyUserToken(req.headers.authorization);
@@ -71,7 +85,7 @@ export async function persistSheetsSync(req: Request, res: Response) {
     // just HKA_MANAGEMENT), and it only ever applies the Sheet's own data,
     // never arbitrary client input, so there's no extra risk in allowing it.
 
-    const { customers, bookings, transactions, therapists, products, services, expenses, attendance } =
+    const { customers, bookings, transactions, therapists, products, services, expenses, attendance, deletedIds } =
       req.body || {};
 
     const written = {
@@ -85,7 +99,22 @@ export async function persistSheetsSync(req: Request, res: Response) {
       attendance: await upsertRows(Attendance, attendance),
     };
 
-    return res.status(200).json({ success: true, written });
+    // Rows that were genuinely removed from the Sheet (not just missing due
+    // to a bad/partial read - see the headers-length guard in
+    // syncStateToSpreadsheetIncremental) get deleted from MongoDB too,
+    // otherwise a deletion in the Sheet would never actually stick.
+    const deleted = {
+      customers: await deleteRows(Customer, deletedIds?.Customers),
+      bookings: await deleteRows(Booking, deletedIds?.Bookings),
+      transactions: await deleteRows(Transaction, deletedIds?.Transactions),
+      therapists: await deleteRows(Therapist, deletedIds?.Therapists),
+      products: await deleteRows(Product, deletedIds?.Products),
+      services: await deleteRows(Service, deletedIds?.Services),
+      expenses: await deleteRows(Expense, deletedIds?.Expenses),
+      attendance: await deleteRows(Attendance, deletedIds?.Attendance),
+    };
+
+    return res.status(200).json({ success: true, written, deleted });
   } catch (err: any) {
     console.error("Error in persistSheetsSync:", err);
     return res.status(500).json({ error: err.message || "Failed to persist Sheets sync." });

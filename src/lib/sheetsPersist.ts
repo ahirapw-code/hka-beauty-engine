@@ -9,18 +9,30 @@ import { Customer, Booking, Transaction, Therapist, Product, Service, Expense, A
  * intentionally not sent - account/auth fields are never sourced from
  * Sheets.
  */
-export async function persistSheetsSyncToServer(data: {
-  customers: Customer[];
-  bookings: Booking[];
-  transactions: Transaction[];
-  therapists: Therapist[];
-  products: Product[];
-  services: Service[];
-  expenses: Expense[];
-  attendance: Attendance[];
-}): Promise<void> {
+export async function persistSheetsSyncToServer(
+  data: {
+    customers: Customer[];
+    bookings: Booking[];
+    transactions: Transaction[];
+    therapists: Therapist[];
+    products: Product[];
+    services: Service[];
+    expenses: Expense[];
+    attendance: Attendance[];
+  },
+  deletedIds?: { [sheetName: string]: string[] }
+): Promise<void> {
   const idToken = await auth.currentUser?.getIdToken();
-  if (!idToken) return;
+  if (!idToken) {
+    // Previously this silently returned here, which meant a sync could
+    // "succeed" from the caller's point of view while never actually
+    // reaching the server - no error, no log, nothing saved. Throwing
+    // means the caller's catch block (GoogleSheetsSync.tsx) now surfaces
+    // this as a visible conflict-log entry instead of a silent no-op.
+    throw new Error(
+      'Tidak dapat menyimpan hasil sync: sesi login tidak ditemukan (idToken kosong). Silakan login ulang.'
+    );
+  }
 
   const response = await fetch('/api/sheets/persist', {
     method: 'POST',
@@ -37,6 +49,7 @@ export async function persistSheetsSyncToServer(data: {
       services: data.services,
       expenses: data.expenses,
       attendance: data.attendance,
+      deletedIds: deletedIds || {},
     }),
   });
 
