@@ -484,7 +484,7 @@ export const syncStateToSpreadsheetIncremental = async (
   if (appsScriptUrl) {
     const res = await fetchWithRetry(appsScriptUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: 'read', spreadsheetId })
     });
     if (!res.ok) {
@@ -669,7 +669,7 @@ export const syncStateToSpreadsheetIncremental = async (
     if (appsScriptUrl) {
       const res = await fetchWithRetry(appsScriptUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ action: 'write_incremental', spreadsheetId, updates: updatesToPush })
       });
       if (!res.ok) {

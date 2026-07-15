@@ -48,27 +48,76 @@ interface GoogleSheetsSyncProps {
 
 const APPS_SCRIPT_CODE = `// Google Apps Script Web App Code
 // Deploy as Web App, executing as "Me" (your Google account) and allowing access to "Anyone".
+// This version auto-creates every tab & header row your HKA Engine app expects.
+
+var SHEET_SCHEMAS = {
+  'Customers':   ['id','name','email','phone','totalSpend','visitsCount','lastVisit','notes','preferredBranch'],
+  'Bookings':    ['id','customerName','customerPhone','serviceId','serviceName','therapistId','therapistName','branch','date','time','duration','price','status','notes'],
+  'Transactions':['id','date','customerName','branch','subtotal','discount','total','paymentMethod','cashierName','items_json'],
+  'Therapists':  ['id','name','branch','specialties','rating','commissionRate','totalCommissionEarned','status','monthlyTarget','currentSales','baseSalary'],
+  'Products':    ['id','name','sku','price','cost','stock','minStock','branch','category'],
+  'Expenses':    ['id','branch','category','amount','date','description'],
+  'Attendance':  ['id','userId','userName','role','branch','date','clockIn','clockOut','status','notes'],
+  'Users':       ['id','username','name','role','branch','email','avatar']
+};
+
+function ensureSheets(ss) {
+  var names = Object.keys(SHEET_SCHEMAS);
+  for (var i = 0; i < names.length; i++) {
+    var name = names[i];
+    var headers = SHEET_SCHEMAS[name];
+    var sheet = ss.getSheetByName(name);
+    if (!sheet) {
+      sheet = ss.insertSheet(name);
+    }
+    if (sheet.getLastRow() === 0) {
+      var range = sheet.getRange(1, 1, 1, headers.length);
+      range.setValues([headers]);
+      range.setFontWeight('bold').setBackground('#f1f3f4');
+      sheet.setFrozenRows(1);
+      sheet.autoResizeColumns(1, headers.length);
+    }
+  }
+  // Clean up the default blank "Sheet1" Google gives every new spreadsheet
+  var defaultSheet = ss.getSheetByName('Sheet1');
+  if (defaultSheet && defaultSheet.getLastRow() === 0 && ss.getSheets().length > 1) {
+    ss.deleteSheet(defaultSheet);
+  }
+}
+
+// Visit YOUR_WEB_APP_URL?spreadsheetId=YOUR_ID in a browser any time to
+// (re)create all tabs/headers without needing the app to trigger a sync.
+function doGet(e) {
+  var spreadsheetId = e.parameter.spreadsheetId;
+  if (!spreadsheetId) {
+    return ContentService.createTextOutput('Missing ?spreadsheetId=... in the URL.');
+  }
+  var ss = SpreadsheetApp.openById(spreadsheetId);
+  ensureSheets(ss);
+  return ContentService.createTextOutput('OK - all HKA Engine sheets are set up in "' + ss.getName() + '".');
+}
 
 function doPost(e) {
   var params = JSON.parse(e.postData.contents);
   var action = params.action;
   var spreadsheetId = params.spreadsheetId;
-  
+
   var ss = SpreadsheetApp.openById(spreadsheetId);
-  
+  ensureSheets(ss);
+
   if (action === 'read') {
     var result = {};
     var sheets = ss.getSheets();
     for (var i = 0; i < sheets.length; i++) {
       var sheet = sheets[i];
       var name = sheet.getName();
-      var values = sheet.getDataRange().getValues();
-      result[name] = values;
+      if (!SHEET_SCHEMAS[name]) continue;
+      result[name] = sheet.getDataRange().getValues();
     }
     return ContentService.createTextOutput(JSON.stringify({ status: 'success', data: result }))
       .setMimeType(ContentService.MimeType.JSON);
   }
-  
+
   if (action === 'write_incremental') {
     var updates = params.updates;
     for (var i = 0; i < updates.length; i++) {
@@ -85,6 +134,9 @@ function doPost(e) {
     return ContentService.createTextOutput(JSON.stringify({ status: 'success' }))
       .setMimeType(ContentService.MimeType.JSON);
   }
+
+  return ContentService.createTextOutput(JSON.stringify({ status: 'error', message: 'Unknown action: ' + action }))
+    .setMimeType(ContentService.MimeType.JSON);
 }`;
 
 export default function GoogleSheetsSync({
