@@ -604,30 +604,43 @@ export const syncStateToSpreadsheetIncremental = async (
         const remoteRow = remoteInfo.rowValues;
         const rowNum = remoteInfo.rowIndex;
 
-        const remoteChanged = lastSyncedRow ? !areRowsEqual(remoteRow, lastSyncedRow) : false;
-        const localChanged = lastSyncedRow ? !areRowsEqual(localRow, lastSyncedRow) : true;
-
-        if (remoteChanged && localChanged) {
-          // Conflict: Keep remote (truth)
-          const parsedRemote = parseRawSheetValues(sheetName, headers, [remoteRow])[0];
-          nextLocalRecords.push(parsedRemote);
-          conflictLog.push(`Konflik pada tab ${sheetName} (ID: ${id}) diselesaikan dengan mempertahankan data cloud.`);
-          newLastSyncedRaw[sheetName][id] = remoteRow;
-        } else if (remoteChanged) {
-          // Sync remote
+        if (!lastSyncedRow) {
+          // No baseline yet for this record on this device (first sync ever,
+          // a new browser/device, or a cleared cache). We have no way to
+          // know whether "local" or "remote" reflects the intentional edit
+          // here - defaulting to "push local" (the old behaviour) silently
+          // overwrites whatever was just typed into the Sheet with whatever
+          // this browser happened to have in memory. Always defer to the
+          // Sheet in this case; it's the value a human deliberately entered.
           const parsedRemote = parseRawSheetValues(sheetName, headers, [remoteRow])[0];
           nextLocalRecords.push(parsedRemote);
           newLastSyncedRaw[sheetName][id] = remoteRow;
-        } else if (localChanged) {
-          // Push local
-          updatesToPush.push({ sheet: sheetName, range: `${sheetName}!A${rowNum}:${lastCol}${rowNum}`, values: [localRow] });
-          pushedCount++;
-          nextLocalRecords.push(record);
-          newLastSyncedRaw[sheetName][id] = localRow;
         } else {
-          // Matches
-          nextLocalRecords.push(record);
-          newLastSyncedRaw[sheetName][id] = remoteRow;
+          const remoteChanged = !areRowsEqual(remoteRow, lastSyncedRow);
+          const localChanged = !areRowsEqual(localRow, lastSyncedRow);
+
+          if (remoteChanged && localChanged) {
+            // Conflict: Keep remote (truth)
+            const parsedRemote = parseRawSheetValues(sheetName, headers, [remoteRow])[0];
+            nextLocalRecords.push(parsedRemote);
+            conflictLog.push(`Konflik pada tab ${sheetName} (ID: ${id}) diselesaikan dengan mempertahankan data cloud.`);
+            newLastSyncedRaw[sheetName][id] = remoteRow;
+          } else if (remoteChanged) {
+            // Sync remote
+            const parsedRemote = parseRawSheetValues(sheetName, headers, [remoteRow])[0];
+            nextLocalRecords.push(parsedRemote);
+            newLastSyncedRaw[sheetName][id] = remoteRow;
+          } else if (localChanged) {
+            // Push local
+            updatesToPush.push({ sheet: sheetName, range: `${sheetName}!A${rowNum}:${lastCol}${rowNum}`, values: [localRow] });
+            pushedCount++;
+            nextLocalRecords.push(record);
+            newLastSyncedRaw[sheetName][id] = localRow;
+          } else {
+            // Matches
+            nextLocalRecords.push(record);
+            newLastSyncedRaw[sheetName][id] = remoteRow;
+          }
         }
       } else {
         if (lastSyncedRow) {
