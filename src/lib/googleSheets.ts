@@ -348,7 +348,7 @@ export const writeAllDataToSpreadsheet = async (
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      valueInputOption: 'USER_ENTERED',
+      valueInputOption: 'RAW',
       data: batchData
     }),
   });
@@ -712,7 +712,7 @@ export const syncStateToSpreadsheetIncremental = async (
       const res = await fetchWithRetry(url, {
         method: 'POST',
         headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data: updatesToPush })
+        body: JSON.stringify({ valueInputOption: 'RAW', data: updatesToPush })
       });
       if (!res.ok) {
         if (res.status === 401) throw new Error('SESSION_EXPIRED');
