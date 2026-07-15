@@ -15,17 +15,7 @@ import {
   Service,
   Attendance 
 } from './types';
-import { 
-  PRESET_USERS, 
-  INITIAL_CUSTOMERS, 
-  INITIAL_BOOKINGS, 
-  INITIAL_TRANSACTIONS, 
-  INITIAL_THERAPISTS, 
-  INITIAL_PRODUCTS, 
-  INITIAL_EXPENSES, 
-  INITIAL_SERVICES,
-  INITIAL_ATTENDANCE
-} from './data/mockData';
+import { INITIAL_THERAPISTS } from './data/mockData';
 import {
   addCustomer,
   addBooking,
@@ -34,8 +24,7 @@ import {
   restockProduct,
   addExpense,
   addAttendance,
-  updateAttendance,
-  seedDatabaseIfEmpty
+  updateAttendance
 } from './lib/firestoreService';
 import Login from './components/Login';
 import Sidebar from './components/Sidebar';
@@ -88,15 +77,13 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // Business state engines loaded from localStorage initially as temporary/offline cache.
-  // IMPORTANT: fallback is an empty array, NOT the INITIAL_*/PRESET_* mock
-  // constants. Those mock arrays are only for seedDatabaseIfEmpty (writing
-  // starter data into a brand-new, empty MongoDB). If they were used here
-  // too, then on any browser/session without a localStorage cache yet, the
-  // Sheets sync engine would treat every mock record as a "new local
-  // record" (their ids don't exist in the real, since-edited spreadsheet)
-  // and append the entire mock dataset back into the spreadsheet as bogus
-  // new rows. An empty array is safe here: the sync engine just defers
-  // entirely to the spreadsheet/MongoDB until the real data has loaded.
+  // IMPORTANT: fallback is an empty array, NOT an INITIAL_*/PRESET_* mock
+  // constant. Using mock data as a fallback here caused the Sheets sync
+  // engine to treat every mock record as a "new local record" (their ids
+  // don't exist in the real, since-edited spreadsheet) and append the
+  // entire mock dataset back into the spreadsheet as bogus new rows. An
+  // empty array is safe: the sync engine just defers entirely to the
+  // spreadsheet/MongoDB until the real data has loaded.
   const [customers, setCustomers] = useState<Customer[]>(() => {
     const saved = localStorage.getItem('hka_customers');
     return saved ? JSON.parse(saved) : [];
@@ -172,17 +159,16 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
 
-    // Trigger seeding of default/initial fallback datasets if the firestore is empty
-    seedDatabaseIfEmpty(
-      INITIAL_CUSTOMERS,
-      INITIAL_BOOKINGS,
-      INITIAL_TRANSACTIONS,
-      INITIAL_THERAPISTS,
-      INITIAL_PRODUCTS,
-      INITIAL_EXPENSES,
-      INITIAL_ATTENDANCE,
-      INITIAL_SERVICES
-    );
+    // NOTE: seedDatabaseIfEmpty() used to run here on every login, inserting
+    // INITIAL_*/mock data into any collection MongoDB reported as empty.
+    // That was fine for a brand-new install, but now that Sheets is the
+    // source of truth and mock rows get correctly deleted end-to-end
+    // (Sheet -> deletedIds -> MongoDB), a legitimately-emptied collection
+    // would get reseeded with mock data on the very next login - which is
+    // exactly the "mock data keeps coming back" bug this was chasing. Do
+    // not reintroduce this call; if a fresh environment ever needs starter
+    // data again, seed it once, explicitly, via a one-off script - not on
+    // every app load.
 
     // 1. Customers Real-time sync
     const unsubCustomers = onSnapshot(collection(db, 'customers'), (snapshot) => {
