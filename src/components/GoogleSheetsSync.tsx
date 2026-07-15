@@ -47,6 +47,11 @@ interface GoogleSheetsSyncProps {
     users: User[];
   }) => void;
   currentUser: User | null;
+  /** True once every collection has loaded real data from MongoDB at least
+   * once. Auto-sync must wait for this - otherwise it runs against the
+   * localStorage/mock fallback values React state starts with, and pushes
+   * that placeholder data into the spreadsheet, overwriting real edits. */
+  dataReady: boolean;
 }
 
 const APPS_SCRIPT_CODE = `// Google Apps Script Web App Code
@@ -178,7 +183,8 @@ export default function GoogleSheetsSync({
   attendance,
   users,
   onDataLoaded,
-  currentUser
+  currentUser,
+  dataReady
 }: GoogleSheetsSyncProps) {
   const [googleUser, setGoogleUser] = useState<any>(null);
   const [token, setToken] = useState<string | null>(null);
@@ -214,6 +220,18 @@ export default function GoogleSheetsSync({
 
   const isHQManagement = currentUser?.role === 'HKA_MANAGEMENT';
   const isSyncingRef = useRef(false);
+
+  // Always-fresh snapshot of the data props, read by handleIncrementalSync
+  // at call time. This lets the auto-sync effect below schedule itself off
+  // of (spreadsheetId, token, appsScriptUrl, autoSync, dataReady) only,
+  // instead of re-running (and re-firing an immediate sync) every single
+  // time any business record changes - which previously caused sync calls
+  // to fire back-to-back using whatever partial/stale data happened to be
+  // in scope at that instant.
+  const latestDataRef = useRef({ customers, bookings, transactions, therapists, products, services, expenses, attendance, users });
+  useEffect(() => {
+    latestDataRef.current = { customers, bookings, transactions, therapists, products, services, expenses, attendance, users };
+  }, [customers, bookings, transactions, therapists, products, services, expenses, attendance, users]);
 
   // 1. Listen to shared spreadsheet and Apps Script config from Firestore
   useEffect(() => {
@@ -270,6 +288,16 @@ export default function GoogleSheetsSync({
       }
       return;
     }
+    if (!dataReady) {
+      // Real data from MongoDB hasn't finished loading yet - syncing now
+      // would read the localStorage/mock placeholder values and push them
+      // into the spreadsheet, overwriting real edits. Silently skip; the
+      // 30s interval or the next data change will retry once ready.
+      if (!isBackground) {
+        setErrorMessage('Data aplikasi masih dimuat, coba lagi sebentar.');
+      }
+      return;
+    }
 
     isSyncingRef.current = true;
     if (!isBackground) {
@@ -281,7 +309,7 @@ export default function GoogleSheetsSync({
       const result = await syncStateToSpreadsheetIncremental(
         spreadsheetId,
         token,
-        { customers, bookings, transactions, therapists, products, services, expenses, attendance, users },
+        latestDataRef.current,
         appsScriptUrl
       );
 
@@ -364,7 +392,7 @@ export default function GoogleSheetsSync({
   // 4. Automated periodic sync running every 30 seconds
   useEffect(() => {
     const canSync = spreadsheetId && (token || appsScriptUrl);
-    if (!canSync || !autoSync) return;
+    if (!canSync || !autoSync || !dataReady) return;
 
     // Run once on load/mount/role change
     handleIncrementalSync(true);
@@ -374,7 +402,14 @@ export default function GoogleSheetsSync({
     }, 30000);
 
     return () => clearInterval(interval);
-  }, [spreadsheetId, token, appsScriptUrl, autoSync, customers, bookings, transactions, therapists, products, services, expenses, attendance, users]);
+    // Deliberately NOT depending on customers/bookings/etc: this effect
+    // schedules *when* sync runs. Each scheduled run reads fresh data via
+    // latestDataRef at call time, so it doesn't need to restart every time
+    // a record changes - restarting on every change was firing a sync
+    // immediately with whatever partial state existed at that render,
+    // which is exactly what caused mock/stale data to get pushed to Sheets.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spreadsheetId, token, appsScriptUrl, autoSync, dataReady]);
 
   // Google Authentication popup
   const handleLogin = async () => {
