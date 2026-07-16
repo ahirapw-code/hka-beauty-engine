@@ -47,21 +47,37 @@ type Row = Record<string, any>;
 
 async function upsertRows(model: any, rows: Row[] | undefined) {
   if (!Array.isArray(rows) || rows.length === 0) return 0;
-  let count = 0;
-  for (const row of rows) {
-    const id = row.id || row._id;
-    if (!id) continue;
-    const fields = { ...row };
-    delete fields.id;
-    delete fields._id;
-    await model.findByIdAndUpdate(
-      id,
-      { $set: fields },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
-    );
-    count++;
-  }
-  return count;
+
+  const ops = rows
+    .map((row) => {
+      const id = row.id || row._id;
+      if (!id) return null;
+      const fields = { ...row };
+      delete fields.id;
+      delete fields._id;
+      return {
+        updateOne: {
+          filter: { _id: id },
+          update: { $set: fields },
+          upsert: true,
+          setDefaultsOnInsert: true,
+        },
+      };
+    })
+    .filter((op): op is NonNullable<typeof op> => op !== null);
+
+  if (ops.length === 0) return 0;
+
+  // One network round-trip for the whole collection instead of one per
+  // record - the previous sequential findByIdAndUpdate loop was slow
+  // enough on larger real-world datasets (bookings/transactions especially)
+  // to blow past Vercel's function time limit and return a 504, which
+  // silently dropped the entire sync (nothing got persisted, no partial
+  // progress either, since the timeout kills the function mid-loop).
+  // Using the Mongoose Model's own bulkWrite (not the raw driver
+  // collection) keeps schema-level casting and setDefaultsOnInsert intact.
+  const result = await model.bulkWrite(ops, { ordered: false });
+  return (result.upsertedCount || 0) + (result.modifiedCount || 0);
 }
 
 async function deleteRows(model: any, ids: string[] | undefined) {
@@ -88,30 +104,56 @@ export async function persistSheetsSync(req: Request, res: Response) {
     const { customers, bookings, transactions, therapists, products, services, expenses, attendance, deletedIds } =
       req.body || {};
 
+    const [
+      customersWritten, bookingsWritten, transactionsWritten, therapistsWritten,
+      productsWritten, servicesWritten, expensesWritten, attendanceWritten,
+    ] = await Promise.all([
+      upsertRows(Customer, customers),
+      upsertRows(Booking, bookings),
+      upsertRows(Transaction, transactions),
+      upsertRows(Therapist, therapists),
+      upsertRows(Product, products),
+      upsertRows(Service, services),
+      upsertRows(Expense, expenses),
+      upsertRows(Attendance, attendance),
+    ]);
     const written = {
-      customers: await upsertRows(Customer, customers),
-      bookings: await upsertRows(Booking, bookings),
-      transactions: await upsertRows(Transaction, transactions),
-      therapists: await upsertRows(Therapist, therapists),
-      products: await upsertRows(Product, products),
-      services: await upsertRows(Service, services),
-      expenses: await upsertRows(Expense, expenses),
-      attendance: await upsertRows(Attendance, attendance),
+      customers: customersWritten,
+      bookings: bookingsWritten,
+      transactions: transactionsWritten,
+      therapists: therapistsWritten,
+      products: productsWritten,
+      services: servicesWritten,
+      expenses: expensesWritten,
+      attendance: attendanceWritten,
     };
 
     // Rows that were genuinely removed from the Sheet (not just missing due
     // to a bad/partial read - see the headers-length guard in
     // syncStateToSpreadsheetIncremental) get deleted from MongoDB too,
     // otherwise a deletion in the Sheet would never actually stick.
+    const [
+      customersDeleted, bookingsDeleted, transactionsDeleted, therapistsDeleted,
+      productsDeleted, servicesDeleted, expensesDeleted, attendanceDeleted,
+    ] = await Promise.all([
+      deleteRows(Customer, deletedIds?.Customers),
+      deleteRows(Booking, deletedIds?.Bookings),
+      deleteRows(Transaction, deletedIds?.Transactions),
+      deleteRows(Therapist, deletedIds?.Therapists),
+      deleteRows(Product, deletedIds?.Products),
+      deleteRows(Service, deletedIds?.Services),
+      deleteRows(Expense, deletedIds?.Expenses),
+      deleteRows(Attendance, deletedIds?.Attendance),
+    ]);
     const deleted = {
-      customers: await deleteRows(Customer, deletedIds?.Customers),
-      bookings: await deleteRows(Booking, deletedIds?.Bookings),
-      transactions: await deleteRows(Transaction, deletedIds?.Transactions),
-      therapists: await deleteRows(Therapist, deletedIds?.Therapists),
-      products: await deleteRows(Product, deletedIds?.Products),
-      services: await deleteRows(Service, deletedIds?.Services),
-      expenses: await deleteRows(Expense, deletedIds?.Expenses),
-      attendance: await deleteRows(Attendance, deletedIds?.Attendance),
+      customers: customersDeleted,
+      bookings: bookingsDeleted,
+      transactions: transactionsDeleted,
+      therapists: therapistsDeleted,
+      products: productsDeleted,
+      services: servicesDeleted,
+      expenses: expensesDeleted,
+      attendance: attendanceDeleted,
     };
 
     return res.status(200).json({ success: true, written, deleted });
