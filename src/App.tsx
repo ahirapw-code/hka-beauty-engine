@@ -366,6 +366,19 @@ export default function App() {
     }
   };
 
+  // Keeps the in-memory session, localStorage cache, and the staff
+  // directory list all in sync after a self-service avatar change - the
+  // actual write to the database already happened in Sidebar.tsx.
+  const handleUpdateOwnAvatar = (avatarUrl: string) => {
+    setUser(prev => {
+      if (!prev) return prev;
+      const updated = { ...prev, avatar: avatarUrl };
+      localStorage.setItem('hka_current_user', JSON.stringify(updated));
+      return updated;
+    });
+    setUsersList(prev => prev.map(u => (u.id === user?.id ? { ...u, avatar: avatarUrl } : u)));
+  };
+
   const handleLogout = async () => {
     try {
       await auth.signOut();
@@ -707,6 +720,7 @@ export default function App() {
         onLogout={handleLogout}
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
+        onUpdateOwnAvatar={handleUpdateOwnAvatar}
       />
 
       {/* Main interactive viewport container */}
