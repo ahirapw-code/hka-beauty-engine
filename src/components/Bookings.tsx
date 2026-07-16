@@ -37,7 +37,7 @@ interface BookingsProps {
   customers: Customer[];
   services: Service[];
   therapists: Therapist[];
-  onAddBooking: (booking: Omit<Booking, 'id'>) => void;
+  onAddBooking: (booking: Omit<Booking, 'id'>) => Promise<void>;
   onUpdateBookingStatus: (id: string, status: 'pending' | 'checked_in' | 'completed' | 'cancelled') => void;
 }
 
@@ -66,6 +66,7 @@ export default function Bookings({
   const [bookingTime, setBookingTime] = useState('12:00');
   const [bookingNotes, setBookingNotes] = useState('');
   const [generalError, setGeneralError] = useState('');
+  const [isSubmittingBooking, setIsSubmittingBooking] = useState(false);
 
   // Filtering list triggers
   const activeBranchFilter = isTherapist ? user.branch : (user.role === 'SALON_MANAGER' ? user.branch : selectedBranch);
@@ -169,7 +170,7 @@ export default function Bookings({
     return { conflictError, availableSuggestions };
   }, [bookings, selectedTherapistId, selectedTherapist, selectedServiceId, selectedService, bookingDate, bookingTime, branchTherapists, bookingBranch]);
 
-  const handleBookingSubmit = (e: React.FormEvent) => {
+  const handleBookingSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (conflictError) {
       return;
@@ -180,25 +181,35 @@ export default function Bookings({
 
     if (!customer || !service || !therapist) return;
 
-    onAddBooking({
-      customerName: customer.name,
-      customerPhone: customer.phone,
-      serviceId: service.id,
-      serviceName: service.name,
-      therapistId: therapist.id,
-      therapistName: therapist.name,
-      branch: bookingBranch,
-      date: bookingDate,
-      time: bookingTime,
-      duration: service.duration,
-      price: service.price,
-      status: 'pending',
-      notes: bookingNotes
-    });
+    setGeneralError('');
+    setIsSubmittingBooking(true);
+    try {
+      await onAddBooking({
+        customerName: customer.name,
+        customerPhone: customer.phone,
+        serviceId: service.id,
+        serviceName: service.name,
+        therapistId: therapist.id,
+        therapistName: therapist.name,
+        branch: bookingBranch,
+        date: bookingDate,
+        time: bookingTime,
+        duration: service.duration,
+        price: service.price,
+        status: 'pending',
+        notes: bookingNotes
+      });
 
-    // Reset Form
-    setBookingNotes('');
-    setShowAddBooking(false);
+      // Reset Form - only on confirmed success, so a failed save leaves the
+      // drawer open with the person's input intact instead of silently
+      // discarding it.
+      setBookingNotes('');
+      setShowAddBooking(false);
+    } catch (err: any) {
+      setGeneralError(err?.message || 'Gagal menyimpan booking. Silakan coba lagi.');
+    } finally {
+      setIsSubmittingBooking(false);
+    }
   };
 
   return (
@@ -514,9 +525,10 @@ export default function Bookings({
 
               <button
                 type="submit"
-                className="w-full bg-[#1a1c1e] hover:bg-slate-800 text-white font-bold text-xs py-3 rounded-xl cursor-pointer mt-4"
+                disabled={isSubmittingBooking}
+                className="w-full bg-[#1a1c1e] hover:bg-slate-800 text-white font-bold text-xs py-3 rounded-xl cursor-pointer mt-4 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Schedule Appointment
+                {isSubmittingBooking ? 'Menyimpan...' : 'Schedule Appointment'}
               </button>
             </form>
           </div>
