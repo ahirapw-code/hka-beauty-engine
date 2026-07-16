@@ -121,8 +121,24 @@ export async function updateBookingStatus(
 ): Promise<void> {
   const path = `bookings/${bookingId}`;
   try {
-    // We update the booking status
-    await updateDoc(doc(db, 'bookings', bookingId), { status });
+    // Plain generic writes to "bookings" are intentionally blocked server-side
+    // (see server/middleware/authorize.ts - corrections go through Sheets).
+    // Check-in/complete/cancel are a deliberate, narrow exception to that,
+    // so they go through their own dedicated endpoint instead of
+    // updateDoc()/PATCH /api/data/bookings/:id, which now 403s.
+    const idToken = await auth.currentUser?.getIdToken();
+    const response = await fetch(`/api/bookings/${bookingId}/status`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {})
+      },
+      body: JSON.stringify({ status })
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || `Failed to update booking status (status ${response.status})`);
+    }
     
     // If status is completed and there's a transaction payload, process transaction
     if (status === 'completed' && transactionToAutoAdd) {
