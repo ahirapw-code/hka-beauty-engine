@@ -45,20 +45,50 @@ import Attendance from "../models/Attendance.js";
 
 type Row = Record<string, any>;
 
-async function upsertRows(model: any, rows: Row[] | undefined) {
+/**
+ * Fields that must never be written through this endpoint even though they
+ * live on collections this endpoint otherwise manages. These are owned by
+ * dedicated, audited flows (processCheckout for sales/commission accrual,
+ * the HKA_MANAGEMENT-only /api/syncSheetsToFirestore for commission-rate /
+ * base-salary changes, which also writes a PayrollAuditLog entry). Letting
+ * a plain Sheets-content sync silently overwrite them would both fight
+ * those flows and let a payroll change land with no audit trail.
+ */
+const AUDIT_OWNED_FIELDS: Record<string, string[]> = {
+  therapists: ["commissionRate", "baseSalary", "currentSales", "totalCommissionEarned"],
+};
+
+/**
+ * Drops keys that can't legitimately be a business field name and would
+ * otherwise be handed straight to Mongo's $set: Mongo operator-looking keys
+ * ("$foo") and dotted paths ("a.b"), which could target a nested field the
+ * writer shouldn't reach. Sheets column headers never produce either.
+ */
+function sanitizeFields(fields: Row, ownedElsewhere: string[] | undefined): Row {
+  const clean: Row = {};
+  for (const [key, value] of Object.entries(fields)) {
+    if (key.startsWith("$") || key.includes(".")) continue;
+    if (ownedElsewhere?.includes(key)) continue;
+    clean[key] = value;
+  }
+  return clean;
+}
+
+async function upsertRows(model: any, rows: Row[] | undefined, collectionName: string) {
   if (!Array.isArray(rows) || rows.length === 0) return 0;
 
   const ops = rows
     .map((row) => {
       const id = row.id || row._id;
-      if (!id) return null;
+      if (!id || typeof id !== "string") return null;
       const fields = { ...row };
       delete fields.id;
       delete fields._id;
+      const cleanFields = sanitizeFields(fields, AUDIT_OWNED_FIELDS[collectionName]);
       return {
         updateOne: {
           filter: { _id: id },
-          update: { $set: fields },
+          update: { $set: cleanFields },
           upsert: true,
           setDefaultsOnInsert: true,
         },
@@ -96,10 +126,20 @@ export async function persistSheetsSync(req: Request, res: Response) {
     if (!userData) {
       return res.status(403).json({ error: "Forbidden: user profile not found." });
     }
-    // Any authenticated staff member can trigger this - the background sync
-    // runs in every role's browser (cashier, therapist, branch manager, not
-    // just HKA_MANAGEMENT), and it only ever applies the Sheet's own data,
-    // never arbitrary client input, so there's no extra risk in allowing it.
+    // SECURITY: this endpoint bulk-writes 8 core business collections
+    // straight to MongoDB with $set on whatever fields the caller sends, so
+    // it must be restricted the same way every other write path to these
+    // collections is (see authorize.ts POLICIES) - management only. This
+    // also matches what the frontend itself already documents
+    // (src/lib/sheetsPersist.ts: "Management-only on the server side").
+    // A non-management caller's background sync will simply fail to
+    // persist to the DB here (already handled as a non-fatal, logged
+    // conflict by GoogleSheetsSync.tsx), not crash the app.
+    if (userData.role !== "HKA_MANAGEMENT" && userData.role !== "SALON_MANAGER") {
+      return res.status(403).json({
+        error: "Forbidden: hanya HKA_MANAGEMENT atau SALON_MANAGER yang diizinkan menyimpan hasil sync Google Sheets.",
+      });
+    }
 
     const { customers, bookings, transactions, therapists, products, services, expenses, attendance, deletedIds } =
       req.body || {};
@@ -108,14 +148,14 @@ export async function persistSheetsSync(req: Request, res: Response) {
       customersWritten, bookingsWritten, transactionsWritten, therapistsWritten,
       productsWritten, servicesWritten, expensesWritten, attendanceWritten,
     ] = await Promise.all([
-      upsertRows(Customer, customers),
-      upsertRows(Booking, bookings),
-      upsertRows(Transaction, transactions),
-      upsertRows(Therapist, therapists),
-      upsertRows(Product, products),
-      upsertRows(Service, services),
-      upsertRows(Expense, expenses),
-      upsertRows(Attendance, attendance),
+      upsertRows(Customer, customers, "customers"),
+      upsertRows(Booking, bookings, "bookings"),
+      upsertRows(Transaction, transactions, "transactions"),
+      upsertRows(Therapist, therapists, "therapists"),
+      upsertRows(Product, products, "products"),
+      upsertRows(Service, services, "services"),
+      upsertRows(Expense, expenses, "expenses"),
+      upsertRows(Attendance, attendance, "attendance"),
     ]);
     const written = {
       customers: customersWritten,
