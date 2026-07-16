@@ -4,10 +4,10 @@ import { clockInOut } from "../controllers/attendanceController.js";
 import { resetStaffPassword } from "../controllers/resetPasswordController.js";
 import { syncSheetsToFirestore } from "../controllers/googleSheetsController.js";
 import { persistSheetsSync } from "../controllers/sheetsPersistController.js";
-import { createBooking, createExpense, createPayrollRun } from "../controllers/recordsController.js";
+import { createBooking, createExpense, createPayrollRun, updateBookingStatus } from "../controllers/recordsController.js";
 import { requireAuthWithProfile } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
-import { checkoutBodySchema, clockInOutBodySchema, bookingCreateSchema } from "../validation/schemas.js";
+import { checkoutBodySchema, clockInOutBodySchema, bookingCreateSchema, bookingStatusUpdateSchema } from "../validation/schemas.js";
 
 const router = Router();
 
@@ -17,6 +17,7 @@ router.post("/resetStaffPassword", resetStaffPassword);
 router.post("/syncSheetsToFirestore", syncSheetsToFirestore);
 
 router.post("/bookings", validate({ body: bookingCreateSchema }), createBooking);
+router.patch("/bookings/:id/status", validate({ body: bookingStatusUpdateSchema }), updateBookingStatus);
 router.post("/expenses", createExpense);
 router.post("/payroll/run", createPayrollRun);
 
