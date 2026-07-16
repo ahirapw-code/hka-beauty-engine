@@ -41,9 +41,21 @@ const WRITE_LOCKED_COLLECTIONS = new Set([
  * app-internal config unrelated to business data (e.g. the sync feature
  * needs somewhere to store its own spreadsheet id / Apps Script URL before
  * any sync has ever run).
+ *
+ * branchProfile_NAO_STUDIO / branchProfile_DIAEL_BEAUTY (src/components/
+ * BranchSettings.tsx, read by src/components/POS.tsx for invoice printing)
+ * belong here too: they're branch metadata (logo, address, phone, bank
+ * info, invoice footer note) that has no corresponding Google Sheets tab
+ * and was never meant to be "managed through Google Sheets" - unlike the
+ * business-data collections this write-lock exists to protect, there's no
+ * accounting/audit trail to bypass here. Without this exemption the write
+ * was silently 403'd for every role, including HKA_MANAGEMENT, and
+ * BranchSettings.tsx's catch-all error handler then showed a misleading
+ * "Pastikan Anda memiliki hak akses HKA_MANAGEMENT" message that made it
+ * look like a permissions problem rather than a missing exemption.
  */
 const WRITE_LOCK_EXEMPT_DOC_IDS: Record<string, Set<string>> = {
-  settings: new Set(["sheets_config", "seed_status"]),
+  settings: new Set(["sheets_config", "seed_status", "branchProfile_NAO_STUDIO", "branchProfile_DIAEL_BEAUTY"]),
 };
 
 interface CollectionPolicy {
