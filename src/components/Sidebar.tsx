@@ -1,5 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { User, Branch } from '../types';
+import { doc, setDoc } from '../lib/firestoreClient';
+import { ref, uploadBytes, getDownloadURL } from '../lib/storageClient';
+import { db, storage } from '../lib/firebase';
 import { 
   LayoutDashboard, 
   CreditCard, 
@@ -14,7 +17,9 @@ import {
   Sliders,
   X,
   Coins,
-  Wallet
+  Wallet,
+  Camera,
+  Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -28,6 +33,7 @@ interface SidebarProps {
   onLogout: () => void;
   isOpen: boolean;
   onClose: () => void;
+  onUpdateOwnAvatar?: (avatarUrl: string) => void;
 }
 
 export default function Sidebar({
@@ -38,10 +44,53 @@ export default function Sidebar({
   setSelectedBranch,
   onLogout,
   isOpen,
-  onClose
+  onClose,
+  onUpdateOwnAvatar
 }: SidebarProps) {
   const isHKA = user.role === 'HKA_MANAGEMENT';
   const [isMobile, setIsMobile] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [avatarError, setAvatarError] = useState('');
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+
+  const MAX_AVATAR_SIZE = 5 * 1024 * 1024; // 5MB
+  const ALLOWED_AVATAR_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
+
+  const handleAvatarFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-selecting the same file next time
+    if (!file) return;
+
+    setAvatarError('');
+
+    if (file.size > MAX_AVATAR_SIZE) {
+      setAvatarError('Ukuran foto maksimal 5MB.');
+      return;
+    }
+    if (!ALLOWED_AVATAR_TYPES.includes(file.type)) {
+      setAvatarError('Format foto harus PNG, JPEG, atau WEBP.');
+      return;
+    }
+
+    setUploadingAvatar(true);
+    try {
+      const extension = file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : 'jpg';
+      const storageRef = ref(storage, `avatars/${user.id}.${extension}`);
+      const snapshot = await uploadBytes(storageRef, file, { contentType: file.type });
+      const downloadUrl = await getDownloadURL(snapshot.ref);
+
+      // Merge write only - a full replace here would wipe passwordHash and
+      // other account fields the caller doesn't know about.
+      await setDoc(doc(db, 'users', user.id), { avatar: downloadUrl }, { merge: true });
+
+      onUpdateOwnAvatar?.(downloadUrl);
+    } catch (err: any) {
+      console.error('Error uploading avatar:', err);
+      setAvatarError(err.message || 'Gagal mengunggah foto. Silakan coba lagi.');
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
 
   useEffect(() => {
     const checkMobile = () => {
@@ -108,13 +157,35 @@ export default function Sidebar({
       {/* Profile & Access Details */}
       <div className="p-4 mx-3 my-4 bg-slate-900/50 rounded-xl border border-slate-800">
         <div className="flex items-center gap-3">
-          {user.avatar ? (
-            <img src={user.avatar} alt={user.name} className="w-10 h-10 rounded-full object-cover ring-2 ring-[#D4AF37]/50" referrerPolicy="no-referrer" />
-          ) : (
-            <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center font-bold text-[#D4AF37]">
-              {user.name.charAt(0)}
+          <input
+            ref={avatarInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/jpg,image/webp"
+            className="hidden"
+            onChange={handleAvatarFileChange}
+          />
+          <button
+            type="button"
+            onClick={() => avatarInputRef.current?.click()}
+            disabled={uploadingAvatar}
+            title="Ubah foto profil (maks. 5MB)"
+            className="relative w-10 h-10 shrink-0 rounded-full group cursor-pointer touch-manipulation disabled:cursor-wait"
+          >
+            {user.avatar ? (
+              <img src={user.avatar} alt={user.name} className="w-10 h-10 rounded-full object-cover ring-2 ring-[#D4AF37]/50" referrerPolicy="no-referrer" />
+            ) : (
+              <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center font-bold text-[#D4AF37]">
+                {user.name.charAt(0)}
+              </div>
+            )}
+            <div className="absolute inset-0 rounded-full bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+              {uploadingAvatar ? (
+                <Loader2 className="w-3.5 h-3.5 text-white animate-spin" />
+              ) : (
+                <Camera className="w-3.5 h-3.5 text-white" />
+              )}
             </div>
-          )}
+          </button>
           <div className="flex-1 min-w-0">
             <h2 className="text-xs font-semibold text-white truncate">{user.name}</h2>
             <div className="flex items-center gap-1 mt-0.5">
@@ -124,6 +195,9 @@ export default function Sidebar({
             </div>
           </div>
         </div>
+        {avatarError && (
+          <p className="mt-2 text-[10px] text-rose-400 font-mono">{avatarError}</p>
+        )}
 
         {/* Operational Scope */}
         <div className="mt-3 pt-3 border-t border-slate-800/80">
@@ -168,7 +242,6 @@ export default function Sidebar({
               }`}
             >
               <span>NAO Studio</span>
-              <span className="text-[9px] bg-slate-700/50 px-1 py-0.2 rounded text-slate-400">Hair & Nails</span>
             </button>
             <button
               id="sidebar-branch-diael"
@@ -183,7 +256,6 @@ export default function Sidebar({
               }`}
             >
               <span>DIAEL Beauty</span>
-              <span className="text-[9px] bg-slate-700/50 px-1 py-0.2 rounded text-slate-400">Lash & Spa</span>
             </button>
           </div>
         </div>
