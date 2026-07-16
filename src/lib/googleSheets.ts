@@ -363,7 +363,12 @@ export const readAllDataFromSpreadsheet = async (spreadsheetId: string, accessTo
   await ensureSheetsExist(spreadsheetId, accessToken);
 
   const ranges = ['Customers!A1:I', 'Bookings!A1:N', 'Transactions!A1:J', 'Therapists!A1:J', 'Products!A1:I', 'Services!A1:F', 'Expenses!A1:F', 'Attendance!A1:J', 'Users!A1:G'];
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?ranges=${ranges.join('&ranges=')}`;
+  // valueRenderOption=UNFORMATTED_VALUE is critical here: without it, Sheets
+  // returns cells as their *display* string (e.g. "Rp50.000" for a
+  // currency-formatted price cell). Number("Rp50.000") is NaN, which
+  // parseRawSheetValues below silently coerces to 0 - so any price/duration
+  // cell with number formatting applied would read back as 0.
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?ranges=${ranges.join('&ranges=')}&valueRenderOption=UNFORMATTED_VALUE`;
   const res = await fetchWithRetry(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
@@ -440,6 +445,35 @@ export const recordToRow = (sheetName: string, item: any): any[] => {
   }
 };
 
+// Coerce a sheet cell into a number even if it arrived as a formatted
+// display string (e.g. "Rp50.000", "50,000", " 1.250,5 "). Requesting
+// UNFORMATTED_VALUE from the Sheets API should make this unnecessary in the
+// normal REST path, but this stays as a defensive fallback for the Apps
+// Script path and for values already stored as text in a cell.
+const parseNumericCell = (val: any): number => {
+  if (typeof val === 'number') return Number.isFinite(val) ? val : 0;
+  if (val === null || val === undefined || val === '') return 0;
+  const direct = Number(val);
+  if (Number.isFinite(direct)) return direct;
+  // Strip anything that isn't a digit, minus sign, or separator, then drop
+  // thousands separators (assume the last '.' or ',' before <=2 trailing
+  // digits is the decimal point; otherwise treat all dots/commas as
+  // thousands separators, which matches Indonesian Rupiah formatting).
+  const cleaned = String(val).replace(/[^0-9.,-]/g, '');
+  if (!cleaned) return 0;
+  const decimalMatch = cleaned.match(/[.,](\d{1,2})$/);
+  let normalized: string;
+  if (decimalMatch) {
+    const decimals = decimalMatch[1];
+    const wholePart = cleaned.slice(0, cleaned.length - decimals.length - 1).replace(/[.,]/g, '');
+    normalized = `${wholePart}.${decimals}`;
+  } else {
+    normalized = cleaned.replace(/[.,]/g, '');
+  }
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
 // Parse raw 2D array sheet rows into structured objects
 export const parseRawSheetValues = (sheetName: string, headers: string[], rows: any[][]): any[] => {
   return rows.map((row: any[]) => {
@@ -447,7 +481,7 @@ export const parseRawSheetValues = (sheetName: string, headers: string[], rows: 
     headers.forEach((header: string, i: number) => {
       const val = row[i];
       if (['totalSpend', 'visitsCount', 'price', 'duration', 'subtotal', 'discount', 'total', 'rating', 'commissionRate', 'totalCommissionEarned', 'monthlyTarget', 'currentSales', 'cost', 'stock', 'minStock', 'amount', 'baseSalary'].includes(header)) {
-        obj[header] = Number(val) || 0;
+        obj[header] = parseNumericCell(val);
       } else if (header === 'specialties' || header === 'branches') {
         obj[header] = val ? val.split(',') : [];
       } else if (header === 'items_json') {
@@ -514,7 +548,9 @@ export const syncStateToSpreadsheetIncremental = async (
   } else {
     if (!accessToken) throw new Error('SESSION_EXPIRED');
     const ranges = ['Customers!A1:I', 'Bookings!A1:N', 'Transactions!A1:J', 'Therapists!A1:K', 'Products!A1:I', 'Services!A1:F', 'Expenses!A1:F', 'Attendance!A1:J', 'Users!A1:G'];
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?ranges=${ranges.join('&ranges=')}`;
+    // See note in readAllDataFromSpreadsheet: UNFORMATTED_VALUE avoids reading
+    // currency-formatted price cells back as strings like "Rp50.000".
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?ranges=${ranges.join('&ranges=')}&valueRenderOption=UNFORMATTED_VALUE`;
     const res = await fetchWithRetry(url, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
