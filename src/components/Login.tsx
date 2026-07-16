@@ -170,9 +170,14 @@ export default function Login({ onLoginSuccess, usersList = PRESET_USERS }: Logi
         avatar: `https://i.pravatar.cc/150?u=${username}`
       };
       
-      // Save profile to Firestore
+      // Save profile to Firestore. MUST be a merge write: /api/auth/register
+      // already created the account with a passwordHash, and a non-merge
+      // setDoc does a full document replace server-side - since newProfile
+      // here has no passwordHash field, a plain setDoc would silently wipe
+      // the password that was just set, locking the new account out on its
+      // very next login attempt.
       try {
-        await setDoc(doc(db, 'users', firebaseUser.uid), newProfile);
+        await setDoc(doc(db, 'users', firebaseUser.uid), newProfile, { merge: true });
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, `users/${firebaseUser.uid}`);
         return;
@@ -256,7 +261,10 @@ export default function Login({ onLoginSuccess, usersList = PRESET_USERS }: Logi
             email: preset.email,
             avatar: preset.avatar || `https://i.pravatar.cc/150?u=${preset.username}`
           };
-          await setDoc(doc(db, 'users', firebaseUser.uid), newProfile);
+          // Merge, not replace - same reasoning as the main registration
+          // flow: a non-merge setDoc would wipe the passwordHash that
+          // createUserWithEmailAndPassword just set.
+          await setDoc(doc(db, 'users', firebaseUser.uid), newProfile, { merge: true });
         } catch (err: any) {
           if (err.code === 'auth/email-already-in-use') {
             console.log(`Auth user for ${preset.email} already exists.`);
@@ -349,7 +357,8 @@ export default function Login({ onLoginSuccess, usersList = PRESET_USERS }: Logi
     };
 
     try {
-      await setDoc(doc(db, 'users', pendingProfileUser.uid), newProfile);
+      // Merge, not replace - same reasoning as the main registration flow.
+      await setDoc(doc(db, 'users', pendingProfileUser.uid), newProfile, { merge: true });
       onLoginSuccess(newProfile);
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `users/${pendingProfileUser.uid}`);
