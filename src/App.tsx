@@ -177,10 +177,8 @@ export default function App() {
         list.push(doc.data() as Customer);
       });
       markLoaded('customers');
-      if (list.length > 0) {
-        setCustomers(list);
-        localStorage.setItem('hka_customers', JSON.stringify(list));
-      }
+      setCustomers(list);
+      localStorage.setItem('hka_customers', JSON.stringify(list));
     }, (error) => {
       console.error("Customers subscription error: ", error);
     });
@@ -192,10 +190,8 @@ export default function App() {
         list.push(doc.data() as Booking);
       });
       markLoaded('bookings');
-      if (list.length > 0) {
-        setBookings(list);
-        localStorage.setItem('hka_bookings', JSON.stringify(list));
-      }
+      setBookings(list);
+      localStorage.setItem('hka_bookings', JSON.stringify(list));
     }, (error) => {
       console.error("Bookings subscription error: ", error);
     });
@@ -207,12 +203,10 @@ export default function App() {
         list.push(doc.data() as Transaction);
       });
       markLoaded('transactions');
-      if (list.length > 0) {
-        // Sort descending by transaction date
-        const sorted = list.sort((a, b) => b.date.localeCompare(a.date));
-        setTransactions(sorted);
-        localStorage.setItem('hka_transactions', JSON.stringify(sorted));
-      }
+      // Sort descending by transaction date
+      const sorted = list.sort((a, b) => b.date.localeCompare(a.date));
+      setTransactions(sorted);
+      localStorage.setItem('hka_transactions', JSON.stringify(sorted));
     }, (error) => {
       console.error("Transactions subscription error: ", error);
     });
@@ -224,10 +218,8 @@ export default function App() {
         list.push(doc.data() as Therapist);
       });
       markLoaded('therapists');
-      if (list.length > 0) {
-        setTherapists(list);
-        localStorage.setItem('hka_therapists', JSON.stringify(list));
-      }
+      setTherapists(list);
+      localStorage.setItem('hka_therapists', JSON.stringify(list));
     }, (error) => {
       console.error("Therapists subscription error: ", error);
     });
@@ -239,10 +231,8 @@ export default function App() {
         list.push(doc.data() as Product);
       });
       markLoaded('products');
-      if (list.length > 0) {
-        setProducts(list);
-        localStorage.setItem('hka_products', JSON.stringify(list));
-      }
+      setProducts(list);
+      localStorage.setItem('hka_products', JSON.stringify(list));
     }, (error) => {
       console.error("Products subscription error: ", error);
     });
@@ -254,10 +244,8 @@ export default function App() {
         list.push(doc.data() as Expense);
       });
       markLoaded('expenses');
-      if (list.length > 0) {
-        setExpenses(list);
-        localStorage.setItem('hka_expenses', JSON.stringify(list));
-      }
+      setExpenses(list);
+      localStorage.setItem('hka_expenses', JSON.stringify(list));
     }, (error) => {
       console.error("Expenses subscription error: ", error);
     });
@@ -269,10 +257,8 @@ export default function App() {
         list.push(doc.data() as Attendance);
       });
       markLoaded('attendance');
-      if (list.length > 0) {
-        setAttendance(list);
-        localStorage.setItem('hka_attendance', JSON.stringify(list));
-      }
+      setAttendance(list);
+      localStorage.setItem('hka_attendance', JSON.stringify(list));
     }, (error) => {
       console.error("Attendance subscription error: ", error);
     });
@@ -284,10 +270,8 @@ export default function App() {
         list.push(doc.data() as Service);
       });
       markLoaded('services');
-      if (list.length > 0) {
-        setServices(list);
-        localStorage.setItem('hka_services', JSON.stringify(list));
-      }
+      setServices(list);
+      localStorage.setItem('hka_services', JSON.stringify(list));
     }, (error) => {
       console.error("Services subscription error: ", error);
     });
