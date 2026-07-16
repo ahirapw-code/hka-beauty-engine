@@ -45,9 +45,10 @@ export interface FirestoreErrorInfo {
   }
 }
 
-export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): never {
+  const cleanMessage = error instanceof Error ? error.message : String(error);
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: cleanMessage,
     authInfo: {
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email,
@@ -62,8 +63,13 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     operationType,
     path
   };
+  // Full diagnostic payload goes to the console for debugging, but the
+  // user-facing error stays a clean, readable message - previously this
+  // threw JSON.stringify(errInfo) itself, so any validation error (e.g.
+  // "duration: Number must be greater than 0") ended up shown to the user
+  // as a raw dump including their user id, email, and auth internals.
   console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  throw new Error(cleanMessage);
 }
 
 // 1. ADD CUSTOMER
