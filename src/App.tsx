@@ -149,7 +149,7 @@ export default function App() {
   // fallback above: Sheets sync should still wait for real data rather than
   // running against a transient empty/partial state right at mount.
   const [loadedCollections, setLoadedCollections] = useState<Set<string>>(new Set());
-  const REQUIRED_COLLECTIONS = ['customers', 'bookings', 'transactions', 'therapists', 'products', 'services', 'expenses', 'attendance'];
+  const REQUIRED_COLLECTIONS = ['customers', 'bookings', 'transactions', 'therapists', 'products', 'services', 'expenses', 'attendance', 'users'];
   const dataReady = REQUIRED_COLLECTIONS.every(c => loadedCollections.has(c));
   const markLoaded = (name: string) => {
     setLoadedCollections(prev => (prev.has(name) ? prev : new Set(prev).add(name)));
@@ -338,6 +338,10 @@ export default function App() {
         if (loadedUsers.length > 0) {
           setUsersList(loadedUsers);
         }
+        // Mark 'users' loaded regardless of count, matching the other
+        // collections' markLoaded pattern - otherwise dataReady would never
+        // flip true and Sheets auto-sync would be blocked forever.
+        markLoaded('users');
       } catch (err: any) {
         const isOffline = !navigator.onLine || (err && (err.code === 'unavailable' || String(err.message).toLowerCase().includes('offline')));
         if (isOffline) {
