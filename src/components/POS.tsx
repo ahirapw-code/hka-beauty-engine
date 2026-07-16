@@ -238,6 +238,22 @@ export default function POS({
     return therapists.filter(t => t.branch === posBranch);
   }, [therapists, posBranch]);
 
+  // Customers are branch-specific too (separate NAO Studio / DIAEL Beauty
+  // client bases) - only show the ones whose preferredBranch matches the
+  // active POS branch, same filtering pattern as services/products/therapists.
+  const activeCustomers = useMemo(() => {
+    return customers.filter(c => c.preferredBranch === posBranch);
+  }, [customers, posBranch]);
+
+  // Keep the selected customer in sync with the active branch - if the
+  // branch tab changes (or the current selection no longer belongs to this
+  // branch), fall back to the first customer of the new branch's list.
+  useMemo(() => {
+    if (!activeCustomers.some(c => c.id === selectedCustomerId)) {
+      setSelectedCustomerId(activeCustomers[0]?.id || '');
+    }
+  }, [activeCustomers]);
+
   // Combine services and products for item catalog
   const catalog = useMemo(() => {
     const sItems = activeServices.map(s => ({ ...s, type: 'service' as const }));
@@ -339,7 +355,11 @@ export default function POS({
     if (isCheckingOut) return; // prevent double-submit from a double-tap/click
     setIsCheckingOut(true);
 
-    const customer = customers.find(c => c.id === selectedCustomerId) || customers[0];
+    const customer = customers.find(c => c.id === selectedCustomerId) || activeCustomers[0];
+    if (!customer) {
+      setIsCheckingOut(false);
+      return;
+    }
 
     const txData = {
       customerName: customer.name,
@@ -572,7 +592,7 @@ export default function POS({
                     onChange={(e) => setSelectedCustomerId(e.target.value)}
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl text-xs px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-[#D4AF37]"
                   >
-                    {customers.map(c => (
+                    {activeCustomers.map(c => (
                       <option key={c.id} value={c.id}>{c.name} ({c.phone})</option>
                     ))}
                   </select>
