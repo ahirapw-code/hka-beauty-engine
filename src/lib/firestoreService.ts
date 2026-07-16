@@ -77,7 +77,7 @@ export async function addCustomer(customer: Customer): Promise<void> {
 }
 
 // 2. ADD BOOKING
-export async function addBooking(booking: Booking): Promise<void> {
+export async function addBooking(booking: Booking): Promise<Booking> {
   const path = `bookings/${booking.id}`;
   try {
     const idToken = await auth.currentUser?.getIdToken();
@@ -94,6 +94,11 @@ export async function addBooking(booking: Booking): Promise<void> {
     if (!response.ok) {
       throw new Error(data.error || `Failed to create booking (status ${response.status})`);
     }
+    // The server assigns the real _id (ignoring whatever id the client
+    // generated) - return that record so the caller can add it straight to
+    // local state instead of silently doing nothing and hoping the 4s
+    // onSnapshot poll eventually picks it up.
+    return (data.data || { ...booking }) as Booking;
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);
   }
