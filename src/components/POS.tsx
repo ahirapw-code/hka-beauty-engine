@@ -405,13 +405,13 @@ export default function POS({
   };
 
   return (
-    <div id="pos-module" className="flex flex-col h-[calc(100vh-120px)] xl:h-[calc(100vh-100px)] overflow-hidden">
+    <div id="pos-module" className="flex flex-col h-[calc(100dvh-120px)] xl:h-[calc(100dvh-100px)] overflow-hidden">
       
       {/* Mobile-only sliding tabs - completely smooth */}
       <div className="xl:hidden flex items-center bg-slate-100 p-1 rounded-2xl mb-4 shrink-0 relative">
         <button
           onClick={() => setMobileTab('catalog')}
-          className={`flex-1 text-center py-2.5 rounded-xl text-xs font-bold transition-all duration-300 flex items-center justify-center gap-2 relative z-10 ${
+          className={`flex-1 text-center py-3 rounded-xl text-xs font-bold transition-all duration-300 flex items-center justify-center gap-2 relative z-10 touch-manipulation active:scale-[0.98] ${
             mobileTab === 'catalog' ? 'text-slate-900 font-extrabold' : 'text-slate-500 hover:text-slate-700'
           }`}
         >
@@ -422,7 +422,7 @@ export default function POS({
         </button>
         <button
           onClick={() => setMobileTab('cart')}
-          className={`flex-1 text-center py-2.5 rounded-xl text-xs font-bold transition-all duration-300 flex items-center justify-center gap-2 relative z-10 ${
+          className={`flex-1 text-center py-3 rounded-xl text-xs font-bold transition-all duration-300 flex items-center justify-center gap-2 relative z-10 touch-manipulation active:scale-[0.98] ${
             mobileTab === 'cart' ? 'text-white font-extrabold' : 'text-slate-500 hover:text-slate-700'
           }`}
         >
@@ -519,7 +519,7 @@ export default function POS({
                         setMobileTab('cart');
                       }
                     }}
-                    className="p-4 bg-slate-50 hover:bg-[#FDFBF7] border border-slate-100 hover:border-[#D4AF37]/50 rounded-2xl text-left transition-all relative flex flex-col justify-between h-36 cursor-pointer group shadow-xs hover:shadow-md"
+                    className="p-4 bg-slate-50 hover:bg-[#FDFBF7] active:bg-[#FDFBF7] border border-slate-100 hover:border-[#D4AF37]/50 active:border-[#D4AF37]/50 rounded-2xl text-left transition-all relative flex flex-col justify-between h-40 sm:h-36 cursor-pointer group shadow-xs hover:shadow-md touch-manipulation active:scale-[0.98]"
                   >
                     <div>
                       <span className={`text-[8px] font-mono font-bold tracking-wider uppercase px-2 py-0.5 rounded-full ${
@@ -656,7 +656,7 @@ export default function POS({
                     </div>
                     <button 
                       onClick={() => removeFromCart(item.id, item.type)}
-                      className="text-slate-500 hover:text-rose-400 cursor-pointer transition-all"
+                      className="p-2 -m-2 text-slate-500 hover:text-rose-400 active:text-rose-400 cursor-pointer transition-all touch-manipulation shrink-0"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -684,16 +684,17 @@ export default function POS({
                     <div className="flex items-center gap-1 shrink-0">
                       <input
                         type="number"
+                        inputMode="decimal"
                         min="0"
                         value={item.discountValue || ''}
                         onChange={(e) => updateItemDiscount(item.id, item.type, Math.max(0, Number(e.target.value)), item.discountType || 'flat')}
                         placeholder="0"
-                        className="w-12 bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-center text-[10px] text-white font-mono focus:outline-none focus:ring-1 focus:ring-[#D4AF37]"
+                        className="w-16 bg-slate-800 border border-slate-700 rounded px-1.5 py-1.5 text-center text-[11px] text-white font-mono focus:outline-none focus:ring-1 focus:ring-[#D4AF37]"
                       />
                       <select
                         value={item.discountType || 'flat'}
                         onChange={(e) => updateItemDiscount(item.id, item.type, item.discountValue || 0, e.target.value as 'percent' | 'flat')}
-                        className="bg-slate-800 border border-slate-700 rounded px-1 py-0.5 text-[9px] text-slate-300 focus:outline-none cursor-pointer"
+                        className="bg-slate-800 border border-slate-700 rounded px-1.5 py-1.5 text-[9px] text-slate-300 focus:outline-none cursor-pointer"
                       >
                         <option value="flat">IDR (Rp)</option>
                         <option value="percent">Percent (%)</option>
@@ -704,19 +705,19 @@ export default function POS({
                   {/* Quantity Controls */}
                   <div className="flex items-center justify-between pt-1">
                     <span className="text-[10px] text-slate-400 font-mono">Quantity</span>
-                    <div className="flex items-center gap-2 bg-slate-800 rounded-lg p-0.5 border border-slate-700">
+                    <div className="flex items-center gap-1 bg-slate-800 rounded-lg p-0.5 border border-slate-700">
                       <button 
                         onClick={() => updateQuantity(item.id, item.type, -1)}
-                        className="w-5 h-5 flex items-center justify-center text-slate-300 hover:text-white cursor-pointer"
+                        className="w-8 h-8 flex items-center justify-center text-slate-300 hover:text-white active:bg-slate-700 rounded-md cursor-pointer touch-manipulation"
                       >
-                        <Minus className="w-3 h-3" />
+                        <Minus className="w-3.5 h-3.5" />
                       </button>
-                      <span className="text-xs font-bold font-mono px-1.5 text-white">{item.quantity}</span>
+                      <span className="text-xs font-bold font-mono px-2 text-white min-w-[1.5rem] text-center">{item.quantity}</span>
                       <button 
                         onClick={() => updateQuantity(item.id, item.type, 1)}
-                        className="w-5 h-5 flex items-center justify-center text-slate-300 hover:text-white cursor-pointer"
+                        className="w-8 h-8 flex items-center justify-center text-slate-300 hover:text-white active:bg-slate-700 rounded-md cursor-pointer touch-manipulation"
                       >
-                        <Plus className="w-3 h-3" />
+                        <Plus className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   </div>
@@ -734,11 +735,12 @@ export default function POS({
                 <div className="flex gap-1">
                   <input
                     type="number"
+                    inputMode="decimal"
                     min="0"
                     value={invoiceDiscountValue || ''}
                     onChange={(e) => setInvoiceDiscountValue(Math.max(0, Number(e.target.value)))}
                     placeholder="0"
-                    className="flex-1 bg-slate-800 border border-slate-700 rounded-lg text-xs px-2 py-1.5 text-white text-center font-mono focus:outline-none focus:ring-1 focus:ring-[#D4AF37]"
+                    className="flex-1 bg-slate-800 border border-slate-700 rounded-lg text-xs px-2 py-2.5 text-white text-center font-mono focus:outline-none focus:ring-1 focus:ring-[#D4AF37]"
                   />
                   <select
                     value={invoiceDiscountType}
@@ -755,7 +757,7 @@ export default function POS({
                 <select
                   value={paymentMethod}
                   onChange={(e: any) => setPaymentMethod(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg text-xs px-2 py-1.5 text-white focus:outline-none cursor-pointer"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg text-xs px-2 py-2.5 text-white focus:outline-none cursor-pointer"
                 >
                   <option value="card">Card</option>
                   <option value="cash">Cash</option>
@@ -797,9 +799,9 @@ export default function POS({
             <button
               onClick={handleCheckout}
               disabled={cart.length === 0 || isCheckingOut}
-              className={`w-full font-bold text-xs py-3 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer ${
+              className={`w-full font-bold text-xs py-4 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer touch-manipulation ${
                 cart.length > 0 && !isCheckingOut
-                  ? 'bg-[#D4AF37] hover:bg-amber-400 text-[#1a1c1e]' 
+                  ? 'bg-[#D4AF37] hover:bg-amber-400 active:bg-amber-400 active:scale-[0.98] text-[#1a1c1e]' 
                   : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
               }`}
             >
