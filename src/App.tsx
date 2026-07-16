@@ -461,20 +461,29 @@ export default function App() {
     );
 
     if (hasOverlap) {
-      console.warn("Prevented overbooking for therapist:", newBooking.therapistName);
-      return;
+      // Previously this only logged a console.warn and returned - the
+      // caller (Bookings.tsx) had no way to know the booking was rejected,
+      // so the form reset and the drawer closed as if it had succeeded.
+      throw new Error(
+        `Terapis ${newBooking.therapistName} sudah memiliki jadwal yang bentrok pada slot waktu ini.`
+      );
     }
 
+    // The id here is only a client-side placeholder for the overlap check
+    // above; the server assigns and returns the real _id (see
+    // server/controllers/recordsController.ts createBooking).
     const bookingId = 'b' + (bookings.length + 1);
     const booking: Booking = {
       id: bookingId,
       ...newBooking
     };
-    try {
-      await addBooking(booking);
-    } catch (err) {
-      console.error("Error booking appointment in Firestore: ", err);
-    }
+    // Let errors (validation failures, network errors, auth failures)
+    // propagate to the caller instead of being swallowed here - Bookings.tsx
+    // now awaits this and shows the message via generalError. Previously
+    // this try/catch only did console.error, so a failed save looked
+    // identical to a successful one from the user's perspective.
+    const created = await addBooking(booking);
+    setBookings(prev => [...prev, created]);
   };
 
   // 4. Booking Status Modification
