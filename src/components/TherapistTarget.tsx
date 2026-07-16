@@ -23,9 +23,15 @@ export default function TherapistTarget({
   therapists,
   transactions
 }: TherapistTargetProps) {
-  // Find the therapist object that matches this user
+  // Find the therapist object that matches this user. Matched by name only
+  // (there's no stable id linking a User account to a Therapist record),
+  // so this also scopes to the user's own branch to avoid accidentally
+  // matching a different, same-named therapist at the other branch.
   const therapist = useMemo(() => {
-    return therapists.find(t => t.name.toLowerCase() === user.name.toLowerCase());
+    const targetName = user.name.trim().toLowerCase();
+    return therapists.find(
+      t => t.name.trim().toLowerCase() === targetName && t.branch === user.branch
+    );
   }, [therapists, user]);
 
   // Find all service sales logged for this therapist
@@ -68,6 +74,10 @@ export default function TherapistTarget({
         <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider font-mono">Therapist Profile Pending</h3>
         <p className="text-xs text-slate-400">
           We couldn't locate your corresponding HKA Therapist profile. Please verify your account name matches the therapist database.
+        </p>
+        <p className="text-[10px] text-slate-300 font-mono">
+          Looking for a therapist named "{user.name}" at {user.branch === 'NAO_STUDIO' ? 'NAO Studio' : 'DIAEL Beauty'}. Ask HKA_MANAGEMENT
+          to confirm the name matches exactly (including branch) in ERP &gt; Therapist Records.
         </p>
       </div>
     );
