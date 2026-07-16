@@ -109,11 +109,21 @@ export default function Bookings({
     return therapists.filter(t => t.branch === bookingBranch);
   }, [therapists, bookingBranch]);
 
+  // Customers are branch-specific (separate NAO Studio / DIAEL Beauty client
+  // bases) - only show the ones whose preferredBranch matches the branch
+  // selected in this form.
+  const branchCustomers = useMemo(() => {
+    return customers.filter(c => c.preferredBranch === bookingBranch);
+  }, [customers, bookingBranch]);
+
   // Set default selects when form branch swaps
   useMemo(() => {
     if (branchTreatments.length > 0) setSelectedTreatmentId(branchTreatments[0].id);
     if (branchTherapists.length > 0) setSelectedTherapistId(branchTherapists[0].id);
-  }, [branchTreatments, branchTherapists]);
+    if (!branchCustomers.some(c => c.id === selectedCustomerId)) {
+      setSelectedCustomerId(branchCustomers[0]?.id || '');
+    }
+  }, [branchTreatments, branchTherapists, branchCustomers]);
 
   // Find the selected treatment and therapist
   const selectedTreatment = useMemo(() => {
@@ -192,7 +202,7 @@ export default function Bookings({
     if (conflictError) {
       return;
     }
-    const customer = customers.find(c => c.id === selectedCustomerId) || customers[0];
+    const customer = customers.find(c => c.id === selectedCustomerId) || branchCustomers[0];
     const treatment = TREATMENT_OPTIONS.find(t => t.id === selectedTreatmentId);
     const therapist = therapists.find(t => t.id === selectedTherapistId);
     const duration = Number(bookingDuration);
@@ -425,7 +435,7 @@ export default function Bookings({
                   onChange={(e) => setSelectedCustomerId(e.target.value)}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs px-3 py-2 text-slate-700 focus:outline-none"
                 >
-                  {customers.map(c => (
+                  {branchCustomers.map(c => (
                     <option key={c.id} value={c.id}>{c.name} ({c.phone})</option>
                   ))}
                 </select>
