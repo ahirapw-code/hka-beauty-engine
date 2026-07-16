@@ -30,6 +30,22 @@ const isBookingOverlap = (
   return start1 < end2 && start2 < end1;
 };
 
+// Fixed treatment list — no longer pulled from the Services collection.
+// Duration is intentionally NOT stored here: staff enters it manually per
+// booking and picks an available therapist to match.
+interface TreatmentOption {
+  id: string;
+  name: string;
+  branches: Exclude<Branch, 'ALL'>[];
+}
+
+const TREATMENT_OPTIONS: TreatmentOption[] = [
+  { id: 'hand_nails_treatment', name: 'Hand Nails Treatment', branches: ['NAO_STUDIO'] },
+  { id: 'foot_nails_treatment', name: 'Foot Nails Treatment', branches: ['NAO_STUDIO'] },
+  { id: 'eyelash', name: 'Eyelash', branches: ['DIAEL_BEAUTY'] },
+  { id: 'eyebrow', name: 'Eyebrow', branches: ['DIAEL_BEAUTY'] },
+];
+
 interface BookingsProps {
   user: User;
   selectedBranch: Branch;
@@ -60,10 +76,11 @@ export default function Bookings({
   );
 
   const [selectedCustomerId, setSelectedCustomerId] = useState(customers[0]?.id || '');
-  const [selectedServiceId, setSelectedServiceId] = useState('');
+  const [selectedTreatmentId, setSelectedTreatmentId] = useState('');
   const [selectedTherapistId, setSelectedTherapistId] = useState('');
   const [bookingDate, setBookingDate] = useState(new Date().toISOString().split('T')[0]);
   const [bookingTime, setBookingTime] = useState('12:00');
+  const [bookingDuration, setBookingDuration] = useState<number | ''>('');
   const [bookingNotes, setBookingNotes] = useState('');
   const [generalError, setGeneralError] = useState('');
   const [isSubmittingBooking, setIsSubmittingBooking] = useState(false);
@@ -84,9 +101,9 @@ export default function Bookings({
   }, [bookings, isTherapist, activeBranchFilter, therapists, user.name]);
 
   // Dynamic values based on selected booking branch in form
-  const branchServices = useMemo(() => {
-    return services.filter(s => s.branches.includes(bookingBranch));
-  }, [services, bookingBranch]);
+  const branchTreatments = useMemo(() => {
+    return TREATMENT_OPTIONS.filter(t => t.branches.includes(bookingBranch));
+  }, [bookingBranch]);
 
   const branchTherapists = useMemo(() => {
     return therapists.filter(t => t.branch === bookingBranch);
@@ -94,14 +111,14 @@ export default function Bookings({
 
   // Set default selects when form branch swaps
   useMemo(() => {
-    if (branchServices.length > 0) setSelectedServiceId(branchServices[0].id);
+    if (branchTreatments.length > 0) setSelectedTreatmentId(branchTreatments[0].id);
     if (branchTherapists.length > 0) setSelectedTherapistId(branchTherapists[0].id);
-  }, [branchServices, branchTherapists]);
+  }, [branchTreatments, branchTherapists]);
 
-  // Find the selected service and therapist
-  const selectedService = useMemo(() => {
-    return services.find(s => s.id === selectedServiceId);
-  }, [services, selectedServiceId]);
+  // Find the selected treatment and therapist
+  const selectedTreatment = useMemo(() => {
+    return TREATMENT_OPTIONS.find(t => t.id === selectedTreatmentId);
+  }, [selectedTreatmentId]);
 
   const selectedTherapist = useMemo(() => {
     return therapists.find(t => t.id === selectedTherapistId);
@@ -128,11 +145,11 @@ export default function Bookings({
 
   // Compute overlap conflict and auto-suggestions
   const { conflictError, availableSuggestions } = useMemo(() => {
-    if (!selectedTherapistId || !selectedServiceId || !bookingDate || !bookingTime || !selectedService || !selectedTherapist) {
+    const duration = Number(bookingDuration);
+    if (!selectedTherapistId || !selectedTreatmentId || !bookingDate || !bookingTime || !selectedTreatment || !selectedTherapist || !duration || duration <= 0) {
       return { conflictError: '', availableSuggestions: [] };
     }
 
-    const duration = selectedService.duration;
     const currentSlot = { date: bookingDate, time: bookingTime, duration };
 
     // Check if therapist overlaps on same branch, date, with pending/checked_in statuses
@@ -168,7 +185,7 @@ export default function Bookings({
     }
 
     return { conflictError, availableSuggestions };
-  }, [bookings, selectedTherapistId, selectedTherapist, selectedServiceId, selectedService, bookingDate, bookingTime, branchTherapists, bookingBranch]);
+  }, [bookings, selectedTherapistId, selectedTherapist, selectedTreatmentId, selectedTreatment, bookingDate, bookingTime, bookingDuration, branchTherapists, bookingBranch]);
 
   const handleBookingSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -176,16 +193,14 @@ export default function Bookings({
       return;
     }
     const customer = customers.find(c => c.id === selectedCustomerId) || customers[0];
-    const service = services.find(s => s.id === selectedServiceId);
+    const treatment = TREATMENT_OPTIONS.find(t => t.id === selectedTreatmentId);
     const therapist = therapists.find(t => t.id === selectedTherapistId);
+    const duration = Number(bookingDuration);
 
-    if (!customer || !service || !therapist) return;
+    if (!customer || !treatment || !therapist) return;
 
-    if (!Number.isFinite(service.duration) || service.duration <= 0) {
-      setGeneralError(
-        `Layanan "${service.name}" punya durasi yang tidak valid (${service.duration} menit). ` +
-        `Perbaiki kolom "duration" untuk layanan ini di tab Services pada Google Sheet, lalu tunggu sinkronisasi berikutnya.`
-      );
+    if (!Number.isFinite(duration) || duration <= 0) {
+      setGeneralError('Masukkan durasi treatment (dalam menit) sebelum menjadwalkan appointment.');
       return;
     }
 
@@ -195,15 +210,15 @@ export default function Bookings({
       await onAddBooking({
         customerName: customer.name,
         customerPhone: customer.phone,
-        serviceId: service.id,
-        serviceName: service.name,
+        serviceId: treatment.id,
+        serviceName: treatment.name,
         therapistId: therapist.id,
         therapistName: therapist.name,
         branch: bookingBranch,
         date: bookingDate,
         time: bookingTime,
-        duration: service.duration,
-        price: service.price,
+        duration,
+        price: 0,
         status: 'pending',
         notes: bookingNotes
       });
@@ -211,6 +226,7 @@ export default function Bookings({
       // Reset Form - only on confirmed success, so a failed save leaves the
       // drawer open with the person's input intact instead of silently
       // discarding it.
+      setBookingDuration('');
       setBookingNotes('');
       setShowAddBooking(false);
     } catch (err: any) {
@@ -418,12 +434,12 @@ export default function Bookings({
               <div>
                 <label className="text-[10px] text-slate-400 font-mono block mb-1">CHOOSE TREATMENT</label>
                 <select
-                  value={selectedServiceId}
-                  onChange={(e) => setSelectedServiceId(e.target.value)}
+                  value={selectedTreatmentId}
+                  onChange={(e) => setSelectedTreatmentId(e.target.value)}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs px-3 py-2 text-slate-700 focus:outline-none"
                 >
-                  {branchServices.map(s => (
-                    <option key={s.id} value={s.id}>{s.name} ({formatIDR(s.price)})</option>
+                  {branchTreatments.map(t => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
                   ))}
                 </select>
               </div>
@@ -487,6 +503,21 @@ export default function Bookings({
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs px-2.5 py-2 text-slate-800 focus:outline-none"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] text-slate-400 font-mono block mb-1">DURATION (MENIT)</label>
+                <input
+                  type="number"
+                  required
+                  min={1}
+                  step={5}
+                  placeholder="e.g. 60"
+                  value={bookingDuration}
+                  onChange={(e) => setBookingDuration(e.target.value === '' ? '' : Number(e.target.value))}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs px-2.5 py-2 text-slate-800 focus:outline-none"
+                />
+                <p className="text-[9px] text-slate-400 mt-1">Isi manual sesuai treatment, lalu sesuaikan terapis yang tersedia di jam tersebut.</p>
               </div>
 
               {conflictError && (
