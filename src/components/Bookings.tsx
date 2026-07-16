@@ -181,6 +181,14 @@ export default function Bookings({
 
     if (!customer || !service || !therapist) return;
 
+    if (!Number.isFinite(service.duration) || service.duration <= 0) {
+      setGeneralError(
+        `Layanan "${service.name}" punya durasi yang tidak valid (${service.duration} menit). ` +
+        `Perbaiki kolom "duration" untuk layanan ini di tab Services pada Google Sheet, lalu tunggu sinkronisasi berikutnya.`
+      );
+      return;
+    }
+
     setGeneralError('');
     setIsSubmittingBooking(true);
     try {
