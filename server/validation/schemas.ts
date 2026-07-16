@@ -160,6 +160,16 @@ export const bookingCreateSchema = z.object({
 
 export const bookingUpdateSchema = bookingCreateSchema.partial();
 
+/**
+ * Used only by PATCH /api/bookings/:id/status (see recordsController.ts) -
+ * the one legitimate "update" allowed on the otherwise write-locked
+ * "bookings" collection, since check-in/complete/cancel are real-time
+ * front-desk actions and can't reasonably wait on a Google Sheet edit.
+ */
+export const bookingStatusUpdateSchema = z.object({
+  status: z.enum(BOOKING_STATUSES),
+});
+
 /* ------------------------------------------------------------------ */
 /* Product (collection: "products")                                     */
 /* ------------------------------------------------------------------ */
