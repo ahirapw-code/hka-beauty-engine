@@ -23,6 +23,24 @@ interface AttendanceProps {
   onUpdateAttendance: (id: string, clockOut: string, notes?: string) => void;
 }
 
+// Shared by both the mobile card list and the desktop table so the two
+// views can never drift out of sync with each other.
+function getDurationText(att: Attendance): string {
+  if (att.clockIn && att.clockOut) {
+    const [inH, inM] = att.clockIn.split(':').map(Number);
+    const [outH, outM] = att.clockOut.split(':').map(Number);
+    const diffHrs = (outH - inH) + (outM - inM) / 60;
+    if (diffHrs > 0) {
+      const hrs = Math.floor(diffHrs);
+      const mins = Math.round((diffHrs - hrs) * 60);
+      return `${hrs}h ${mins}m`;
+    }
+  } else if (att.status === 'active') {
+    return 'In Progress';
+  }
+  return '--';
+}
+
 export default function AttendanceComponent({
   user,
   selectedBranch,
@@ -201,7 +219,7 @@ export default function AttendanceComponent({
                     
                     <button
                       onClick={() => handleManualClockOut(att.id)}
-                      className="px-2.5 py-1.5 hover:bg-rose-50 border border-transparent hover:border-rose-100 text-rose-600 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer"
+                      className="px-3 py-2.5 shrink-0 hover:bg-rose-50 active:bg-rose-50 border border-transparent hover:border-rose-100 text-rose-600 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer touch-manipulation"
                       title="Force Clock Out"
                     >
                       <LogOut className="w-3 h-3" />
@@ -249,84 +267,119 @@ export default function AttendanceComponent({
             />
           </div>
 
-          {/* Timesheet Directory Table */}
-          <div className="overflow-x-auto rounded-2xl border border-slate-100">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-50 border-b border-slate-100 text-[10px] font-mono uppercase text-slate-400 tracking-wider">
-                  <th className="py-3 px-4">Staff Member</th>
-                  <th className="py-3 px-4">Role / Branch</th>
-                  <th className="py-3 px-4">Shift Date</th>
-                  <th className="py-3 px-4">Clocked In</th>
-                  <th className="py-3 px-4">Clocked Out</th>
-                  <th className="py-3 px-4">Total Time</th>
-                  <th className="py-3 px-4 text-right">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 text-xs">
-                {filteredAttendance.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="text-center py-10 text-slate-400">
-                      No timesheet records found for the current selection.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredAttendance.map((att) => {
-                    // Compute shift duration
-                    let durationText = '--';
-                    if (att.clockIn && att.clockOut) {
-                      const [inH, inM] = att.clockIn.split(':').map(Number);
-                      const [outH, outM] = att.clockOut.split(':').map(Number);
-                      const diffHrs = (outH - inH) + (outM - inM) / 60;
-                      if (diffHrs > 0) {
-                        const hrs = Math.floor(diffHrs);
-                        const mins = Math.round((diffHrs - hrs) * 60);
-                        durationText = `${hrs}h ${mins}m`;
-                      }
-                    } else if (att.status === 'active') {
-                      durationText = 'In Progress';
-                    }
-
-                    return (
-                      <tr key={att.id} className="hover:bg-slate-50/40 transition-all">
-                        <td className="py-3.5 px-4 font-bold text-slate-800">
-                          {att.userName}
-                          <span className="block text-[10px] font-mono text-slate-400 font-normal mt-0.5">{att.userId}</span>
-                        </td>
-                        <td className="py-3.5 px-4 text-slate-600">
-                          <span className="capitalize">{att.role.toLowerCase().replace('_', ' ')}</span>
-                          <span className="block text-[10px] font-mono text-slate-400 mt-0.5">{att.branch.replace('_', ' ')}</span>
-                        </td>
-                        <td className="py-3.5 px-4 text-slate-600 font-mono">
-                          {att.date}
-                        </td>
-                        <td className="py-3.5 px-4 text-slate-600 font-mono">
-                          {att.clockIn}
-                        </td>
-                        <td className="py-3.5 px-4 text-slate-600 font-mono">
-                          {att.clockOut || '--:--:--'}
-                        </td>
-                        <td className="py-3.5 px-4">
-                          <span className={`font-mono text-xs ${att.status === 'active' ? 'text-emerald-600 font-medium' : 'text-slate-700'}`}>
+          {/* Timesheet Directory - card list on mobile (a wide table here
+              would force sideways scrolling on a phone), real table from
+              md breakpoint up. */}
+          {filteredAttendance.length === 0 ? (
+            <div className="text-center py-10 text-slate-400 text-xs rounded-2xl border border-slate-100">
+              No timesheet records found for the current selection.
+            </div>
+          ) : (
+            <>
+              {/* Mobile card list */}
+              <div className="md:hidden space-y-2.5">
+                {filteredAttendance.map((att) => {
+                  const durationText = getDurationText(att);
+                  return (
+                    <div key={att.id} className="rounded-2xl border border-slate-100 p-4 space-y-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <h4 className="text-xs font-bold text-slate-800 truncate">{att.userName}</h4>
+                          <p className="text-[10px] font-mono text-slate-400 mt-0.5 capitalize">
+                            {att.role.toLowerCase().replace('_', ' ')} • {att.branch.replace('_', ' ')}
+                          </p>
+                        </div>
+                        <span className={`shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-medium ${
+                          att.status === 'active' 
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' 
+                            : 'bg-slate-50 text-slate-600 border border-slate-100'
+                        }`}>
+                          {att.status === 'active' ? 'Active Duty' : 'Completed'}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-4 gap-2 text-center">
+                        <div className="bg-slate-50/60 rounded-xl border border-slate-100 py-2">
+                          <span className="block text-[9px] text-slate-400 font-mono uppercase">Date</span>
+                          <span className="block text-[10px] font-mono font-semibold text-slate-700 mt-0.5">{att.date}</span>
+                        </div>
+                        <div className="bg-slate-50/60 rounded-xl border border-slate-100 py-2">
+                          <span className="block text-[9px] text-slate-400 font-mono uppercase">In</span>
+                          <span className="block text-[10px] font-mono font-semibold text-slate-700 mt-0.5">{att.clockIn}</span>
+                        </div>
+                        <div className="bg-slate-50/60 rounded-xl border border-slate-100 py-2">
+                          <span className="block text-[9px] text-slate-400 font-mono uppercase">Out</span>
+                          <span className="block text-[10px] font-mono font-semibold text-slate-700 mt-0.5">{att.clockOut || '--:--:--'}</span>
+                        </div>
+                        <div className="bg-slate-50/60 rounded-xl border border-slate-100 py-2">
+                          <span className="block text-[9px] text-slate-400 font-mono uppercase">Time</span>
+                          <span className={`block text-[10px] font-mono font-semibold mt-0.5 ${att.status === 'active' ? 'text-emerald-600' : 'text-slate-700'}`}>
                             {durationText}
                           </span>
-                        </td>
-                        <td className="py-3.5 px-4 text-right">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${
-                            att.status === 'active' 
-                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' 
-                              : 'bg-slate-50 text-slate-600 border border-slate-100'
-                          }`}>
-                            {att.status === 'active' ? 'Active Duty' : 'Completed'}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Table from md breakpoint up */}
+              <div className="hidden md:block overflow-x-auto rounded-2xl border border-slate-100">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-100 text-[10px] font-mono uppercase text-slate-400 tracking-wider">
+                      <th className="py-3 px-4">Staff Member</th>
+                      <th className="py-3 px-4">Role / Branch</th>
+                      <th className="py-3 px-4">Shift Date</th>
+                      <th className="py-3 px-4">Clocked In</th>
+                      <th className="py-3 px-4">Clocked Out</th>
+                      <th className="py-3 px-4">Total Time</th>
+                      <th className="py-3 px-4 text-right">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-xs">
+                    {filteredAttendance.map((att) => {
+                      const durationText = getDurationText(att);
+                      return (
+                        <tr key={att.id} className="hover:bg-slate-50/40 transition-all">
+                          <td className="py-3.5 px-4 font-bold text-slate-800">
+                            {att.userName}
+                            <span className="block text-[10px] font-mono text-slate-400 font-normal mt-0.5">{att.userId}</span>
+                          </td>
+                          <td className="py-3.5 px-4 text-slate-600">
+                            <span className="capitalize">{att.role.toLowerCase().replace('_', ' ')}</span>
+                            <span className="block text-[10px] font-mono text-slate-400 mt-0.5">{att.branch.replace('_', ' ')}</span>
+                          </td>
+                          <td className="py-3.5 px-4 text-slate-600 font-mono">
+                            {att.date}
+                          </td>
+                          <td className="py-3.5 px-4 text-slate-600 font-mono">
+                            {att.clockIn}
+                          </td>
+                          <td className="py-3.5 px-4 text-slate-600 font-mono">
+                            {att.clockOut || '--:--:--'}
+                          </td>
+                          <td className="py-3.5 px-4">
+                            <span className={`font-mono text-xs ${att.status === 'active' ? 'text-emerald-600 font-medium' : 'text-slate-700'}`}>
+                              {durationText}
+                            </span>
+                          </td>
+                          <td className="py-3.5 px-4 text-right">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${
+                              att.status === 'active' 
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' 
+                                : 'bg-slate-50 text-slate-600 border border-slate-100'
+                            }`}>
+                              {att.status === 'active' ? 'Active Duty' : 'Completed'}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -348,7 +401,7 @@ export default function AttendanceComponent({
             </div>
 
             <form onSubmit={handleManualSubmit} className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="col-span-2">
                   <label className="text-[10px] text-slate-400 font-mono block mb-1">STAFF FULL NAME *</label>
                   <input
