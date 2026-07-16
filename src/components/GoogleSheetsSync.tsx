@@ -282,14 +282,6 @@ export default function GoogleSheetsSync({
       }
       return;
     }
-    if (!dataReady) {
-      // Real data from MongoDB hasn't finished loading yet in this session.
-      // Skip rather than sync against an incomplete/empty state.
-      if (!isBackground) {
-        setErrorMessage('Data aplikasi masih dimuat, coba lagi sebentar.');
-      }
-      return;
-    }
 
     isSyncingRef.current = true;
     if (!isBackground) {
@@ -383,7 +375,7 @@ export default function GoogleSheetsSync({
   // 4. Automated periodic sync running every 30 seconds
   useEffect(() => {
     const canSync = spreadsheetId && (token || appsScriptUrl);
-    if (!canSync || !autoSync || !dataReady) return;
+    if (!canSync || !autoSync) return;
 
     // Run once on load/mount/role change
     handleIncrementalSync(true);
@@ -398,7 +390,7 @@ export default function GoogleSheetsSync({
     // those arrays here caused this effect to tear down and re-fire an
     // immediate sync every single time any record changed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [spreadsheetId, token, appsScriptUrl, autoSync, dataReady]);
+  }, [spreadsheetId, token, appsScriptUrl, autoSync]);
 
   // Google Authentication popup
   const handleLogin = async () => {
