@@ -175,8 +175,15 @@ export default function ERP({
         avatar: newUserAvatar || fallbackAvatar
       };
 
-      // Write to Firestore db users collection
-      await setDoc(doc(db, 'users', firebaseUser.uid), newUser);
+      // Write to Firestore db users collection. Must be a merge write: the
+      // account was just created with a passwordHash by /api/auth/register
+      // (via createUserWithEmailAndPassword above), and a non-merge setDoc
+      // does a full document replace server-side - since `newUser` here has
+      // no passwordHash field, a plain setDoc would silently wipe the
+      // password that was just set, locking the new staff account out on
+      // its very first login attempt. (Same bug, same fix, as the
+      // self-registration flow in src/components/Login.tsx.)
+      await setDoc(doc(db, 'users', firebaseUser.uid), newUser, { merge: true });
 
       // Add to current client-side state
       onAddUser(newUser);
