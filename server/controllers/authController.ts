@@ -20,7 +20,17 @@ function newUserId() {
  */
 export async function register(req: Request, res: Response) {
   try {
-    const { email, password, username, name, role, branch, avatar } = req.body;
+    // SECURITY: this endpoint is public (no auth token yet - the caller is
+    // about to become one). It must NEVER trust the request body for
+    // privilege-bearing fields like `role` or `branch`, or an anonymous
+    // caller could self-assign HKA_MANAGEMENT. The live frontend only ever
+    // sends { email, password } here (see src/lib/authClient.ts) - `role`,
+    // `branch`, `username`, `name`, `avatar` are intentionally NOT read from
+    // req.body anymore. Every self-registered account is created with the
+    // lowest-privilege role/branch; promoting a user to SALON_MANAGER or
+    // HKA_MANAGEMENT must go through the authenticated, role-gated
+    // PATCH /api/data/users/:id path (authorize.ts, HKA_MANAGEMENT-only).
+    const { email, password } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({ error: "Email and password are required." });
@@ -37,21 +47,22 @@ export async function register(req: Request, res: Response) {
 
     const passwordHash = await bcrypt.hash(password, 10);
     const uid = newUserId();
-    const fallbackUsername = username || normalizedEmail.split("@")[0];
+    const fallbackUsername = normalizedEmail.split("@")[0];
 
-    // Fields not supplied at signup time (username/name/role/branch) get
-    // sensible placeholders. The frontend immediately follows registration
-    // with a full profile write (setDoc on users/{uid}), so these are only
-    // ever visible for the instant between the two calls.
+    // Fields not supplied at signup time get fixed, safe defaults. The
+    // frontend immediately follows registration with a full profile write
+    // through the authorized profile-update flow, so these are only ever
+    // visible for the instant between the two calls - but even so, they are
+    // now hardcoded server-side rather than accepted from the client.
     const newUser = await User.create({
       _id: uid,
       username: String(fallbackUsername).trim().toLowerCase(),
-      name: name ? String(name).trim() : fallbackUsername,
-      role: role || "THERAPIST",
-      branch: branch || "NAO_STUDIO",
+      name: fallbackUsername,
+      role: "THERAPIST",
+      branch: "NAO_STUDIO",
       email: normalizedEmail,
       passwordHash,
-      avatar: avatar || `https://i.pravatar.cc/150?u=${fallbackUsername}`,
+      avatar: `https://i.pravatar.cc/150?u=${fallbackUsername}`,
       forcePasswordChange: false,
     });
 
