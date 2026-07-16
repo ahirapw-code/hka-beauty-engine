@@ -282,6 +282,12 @@ export default function GoogleSheetsSync({
       }
       return;
     }
+    if (!dataReady) {
+      if (!isBackground) {
+        setErrorMessage('Data lokal belum selesai dimuat dari database. Coba lagi sesaat.');
+      }
+      return;
+    }
 
     isSyncingRef.current = true;
     if (!isBackground) {
@@ -374,7 +380,7 @@ export default function GoogleSheetsSync({
 
   // 4. Automated periodic sync running every 30 seconds
   useEffect(() => {
-    const canSync = spreadsheetId && (token || appsScriptUrl);
+    const canSync = spreadsheetId && (token || appsScriptUrl) && dataReady;
     if (!canSync || !autoSync) return;
 
     // Run once on load/mount/role change
@@ -390,7 +396,7 @@ export default function GoogleSheetsSync({
     // those arrays here caused this effect to tear down and re-fire an
     // immediate sync every single time any record changed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [spreadsheetId, token, appsScriptUrl, autoSync]);
+  }, [spreadsheetId, token, appsScriptUrl, autoSync, dataReady]);
 
   // Google Authentication popup
   const handleLogin = async () => {
