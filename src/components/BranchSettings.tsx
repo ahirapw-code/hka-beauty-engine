@@ -146,7 +146,11 @@ export default function BranchSettings() {
       setSuccess(`Profil cabang ${selectedBranch === 'NAO_STUDIO' ? 'NAO Studio' : 'DIAEL Beauty'} berhasil disimpan.`);
     } catch (err: any) {
       console.error('Error saving branch profile:', err);
-      setError('Gagal menyimpan profil cabang. Pastikan Anda memiliki hak akses HKA_MANAGEMENT.');
+      // Show the server's actual reason (e.g. a genuine 403, a validation
+      // error, a network failure) instead of always blaming HKA_MANAGEMENT
+      // access - that hardcoded message previously fired for ANY failure,
+      // including ones that had nothing to do with permissions.
+      setError(err.message || 'Gagal menyimpan profil cabang. Silakan coba lagi.');
     } finally {
       setSaving(false);
     }
