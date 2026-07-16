@@ -17,6 +17,24 @@ interface AttendanceTerminalProps {
   onUpdateAttendance: (id: string, clockOut: string, notes?: string) => void;
 }
 
+// Shared by both the mobile card list and the desktop table so the two
+// views can never drift out of sync with each other.
+function getDurationText(att: Attendance): string {
+  if (att.clockIn && att.clockOut) {
+    const [inH, inM] = att.clockIn.split(':').map(Number);
+    const [outH, outM] = att.clockOut.split(':').map(Number);
+    const diffHrs = (outH - inH) + (outM - inM) / 60;
+    if (diffHrs > 0) {
+      const hrs = Math.floor(diffHrs);
+      const mins = Math.round((diffHrs - hrs) * 60);
+      return `${hrs}h ${mins}m`;
+    }
+  } else if (att.status === 'active') {
+    return 'In Progress';
+  }
+  return '--';
+}
+
 export default function AttendanceTerminal({
   user,
   attendance,
@@ -71,7 +89,7 @@ export default function AttendanceTerminal({
       <div className="xl:col-span-5 flex flex-col gap-6">
         
         {/* Terminal Card */}
-        <div className="bg-white rounded-3xl border border-slate-100 p-8 shadow-sm flex flex-col items-center text-center relative overflow-hidden">
+        <div className="bg-white rounded-3xl border border-slate-100 p-6 sm:p-8 shadow-sm flex flex-col items-center text-center relative overflow-hidden">
           {/* Subtle gold ribbon top border */}
           <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-[#D4AF37] to-[#F3E5AB]" />
 
@@ -80,8 +98,8 @@ export default function AttendanceTerminal({
           </span>
 
           {/* Current Time Display */}
-          <div className="my-8">
-            <span className="text-4xl font-mono font-bold text-slate-800 tracking-tight block">
+          <div className="my-6 sm:my-8">
+            <span className="text-3xl sm:text-4xl font-mono font-bold text-slate-800 tracking-tight block">
               {currentTime.toLocaleTimeString('en-US', { hour12: false })}
             </span>
             <span className="text-xs text-slate-400 font-sans mt-1 block">
@@ -126,7 +144,7 @@ export default function AttendanceTerminal({
 
                 <button
                   onClick={handleClockOut}
-                  className="w-full py-3.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-2xl flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-rose-200"
+                  className="w-full py-4 bg-rose-600 hover:bg-rose-700 active:bg-rose-700 active:scale-[0.98] text-white font-bold text-xs rounded-2xl flex items-center justify-center gap-2 transition-all cursor-pointer touch-manipulation shadow-md shadow-rose-200"
                 >
                   <Square className="w-4 h-4 fill-current" />
                   <span>Clock Out of Shift</span>
@@ -140,7 +158,7 @@ export default function AttendanceTerminal({
 
                 <button
                   onClick={handleClockIn}
-                  className="w-full py-3.5 bg-[#1a1c1e] hover:bg-slate-800 text-[#D4AF37] font-bold text-xs rounded-2xl flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-slate-200"
+                  className="w-full py-4 bg-[#1a1c1e] hover:bg-slate-800 active:bg-slate-800 active:scale-[0.98] text-[#D4AF37] font-bold text-xs rounded-2xl flex items-center justify-center gap-2 transition-all cursor-pointer touch-manipulation shadow-md shadow-slate-200"
                 >
                   <Play className="w-4 h-4 fill-current" />
                   <span>Clock In to Shift</span>
@@ -178,71 +196,95 @@ export default function AttendanceTerminal({
           </div>
         </div>
 
-        {/* History Table */}
-        <div className="overflow-x-auto rounded-2xl border border-slate-100">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-100 text-[10px] font-mono uppercase text-slate-400 tracking-wider">
-                <th className="py-3 px-4">Shift Date</th>
-                <th className="py-3 px-4">Clock In</th>
-                <th className="py-3 px-4">Clock Out</th>
-                <th className="py-3 px-4">Duration</th>
-                <th className="py-3 px-4 text-right">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 text-xs text-slate-600">
-              {myLogs.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="text-center py-10 text-slate-400">
-                    No timesheet logs logged on this account yet.
-                  </td>
-                </tr>
-              ) : (
-                myLogs.map((att) => {
-                  let durationText = '--';
-                  if (att.clockIn && att.clockOut) {
-                    const [inH, inM] = att.clockIn.split(':').map(Number);
-                    const [outH, outM] = att.clockOut.split(':').map(Number);
-                    const diffHrs = (outH - inH) + (outM - inM) / 60;
-                    if (diffHrs > 0) {
-                      const hrs = Math.floor(diffHrs);
-                      const mins = Math.round((diffHrs - hrs) * 60);
-                      durationText = `${hrs}h ${mins}m`;
-                    }
-                  } else if (att.status === 'active') {
-                    durationText = 'In Progress';
-                  }
+        {/* History - card list on mobile (a table here would force sideways
+            scrolling on a phone), real table from md breakpoint up. */}
+        {myLogs.length === 0 ? (
+          <div className="text-center py-10 text-slate-400 text-xs rounded-2xl border border-slate-100 bg-slate-50/40">
+            No timesheet logs logged on this account yet.
+          </div>
+        ) : (
+          <>
+            {/* Mobile card list */}
+            <div className="md:hidden space-y-2.5">
+              {myLogs.map((att) => {
+                const durationText = getDurationText(att);
+                return (
+                  <div key={att.id} className="rounded-2xl border border-slate-100 bg-slate-50/40 p-4 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-800 font-mono">{att.date}</span>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-medium ${
+                        att.status === 'active' 
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' 
+                          : 'bg-slate-100 text-slate-600 border border-slate-200'
+                      }`}>
+                        {att.status === 'active' ? 'Active' : 'Completed'}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      <div className="bg-white rounded-xl border border-slate-100 py-2">
+                        <span className="block text-[9px] text-slate-400 font-mono uppercase">In</span>
+                        <span className="block text-xs font-mono font-semibold text-slate-700 mt-0.5">{att.clockIn}</span>
+                      </div>
+                      <div className="bg-white rounded-xl border border-slate-100 py-2">
+                        <span className="block text-[9px] text-slate-400 font-mono uppercase">Out</span>
+                        <span className="block text-xs font-mono font-semibold text-slate-700 mt-0.5">{att.clockOut || '--:--:--'}</span>
+                      </div>
+                      <div className="bg-white rounded-xl border border-slate-100 py-2">
+                        <span className="block text-[9px] text-slate-400 font-mono uppercase">Duration</span>
+                        <span className="block text-xs font-mono font-semibold text-slate-700 mt-0.5">{durationText}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
 
-                  return (
-                    <tr key={att.id} className="hover:bg-slate-50/20">
-                      <td className="py-3.5 px-4 font-medium text-slate-800 font-mono">
-                        {att.date}
-                      </td>
-                      <td className="py-3.5 px-4 font-mono">
-                        {att.clockIn}
-                      </td>
-                      <td className="py-3.5 px-4 font-mono">
-                        {att.clockOut || '--:--:--'}
-                      </td>
-                      <td className="py-3.5 px-4 font-mono font-medium">
-                        {durationText}
-                      </td>
-                      <td className="py-3.5 px-4 text-right">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-medium ${
-                          att.status === 'active' 
-                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' 
-                            : 'bg-slate-50 text-slate-600 border border-slate-100'
-                        }`}>
-                          {att.status === 'active' ? 'Active' : 'Completed'}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
+            {/* Table from md breakpoint up */}
+            <div className="hidden md:block overflow-x-auto rounded-2xl border border-slate-100">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-100 text-[10px] font-mono uppercase text-slate-400 tracking-wider">
+                    <th className="py-3 px-4">Shift Date</th>
+                    <th className="py-3 px-4">Clock In</th>
+                    <th className="py-3 px-4">Clock Out</th>
+                    <th className="py-3 px-4">Duration</th>
+                    <th className="py-3 px-4 text-right">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-xs text-slate-600">
+                  {myLogs.map((att) => {
+                    const durationText = getDurationText(att);
+                    return (
+                      <tr key={att.id} className="hover:bg-slate-50/20">
+                        <td className="py-3.5 px-4 font-medium text-slate-800 font-mono">
+                          {att.date}
+                        </td>
+                        <td className="py-3.5 px-4 font-mono">
+                          {att.clockIn}
+                        </td>
+                        <td className="py-3.5 px-4 font-mono">
+                          {att.clockOut || '--:--:--'}
+                        </td>
+                        <td className="py-3.5 px-4 font-mono font-medium">
+                          {durationText}
+                        </td>
+                        <td className="py-3.5 px-4 text-right">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-medium ${
+                            att.status === 'active' 
+                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' 
+                              : 'bg-slate-50 text-slate-600 border border-slate-100'
+                          }`}>
+                            {att.status === 'active' ? 'Active' : 'Completed'}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
       </div>
 
     </div>
