@@ -127,6 +127,23 @@ export async function setDocument(req: Request, res: Response) {
       return res.status(200).json({ success: true, data: updated.toJSON() });
     }
 
+    // SAFETY NET for the "users" collection: a non-merge PUT is a full
+    // document replace. If the caller's payload omits `passwordHash` (e.g.
+    // a client "save my profile" write that only knows about
+    // username/name/role/branch/avatar), a plain replace would silently
+    // delete the account's password and lock it out on its next login -
+    // exactly what happened before src/components/Login.tsx's registration
+    // flow was fixed to use `{ merge: true }`. Carrying the existing
+    // passwordHash forward here means any current or future non-merge
+    // write to `users` can no longer destroy it, regardless of what the
+    // caller sends.
+    if (req.params.collection === "users" && payload.passwordHash === undefined) {
+      const existing = await model.findById(req.params.id).select("+passwordHash");
+      if (existing?.passwordHash) {
+        payload.passwordHash = existing.passwordHash;
+      }
+    }
+
     const doc = await model.findOneAndReplace({ _id: req.params.id }, payload, {
       upsert: true,
       new: true,
