@@ -40,6 +40,35 @@ export async function createBooking(req: Request, res: Response) {
   }
 }
 
+/**
+ * PATCH /api/bookings/:id/status - the one deliberate exception to the
+ * "bookings is write-locked, corrections go through Sheets" rule above.
+ * Check-in / complete / cancel are real-time front-desk and therapist
+ * actions (see Bookings.tsx and Dashboard.tsx) - routing them through a
+ * Sheet edit + poll cycle isn't workable, so this narrow endpoint only
+ * ever touches the `status` field and nothing else.
+ */
+export async function updateBookingStatus(req: Request, res: Response) {
+  try {
+    const role = await getCallerRole(req);
+    if (!role) return res.status(401).json({ error: "Unauthorized." });
+
+    const { id } = req.params;
+    const { status } = req.body || {};
+
+    const booking = await Booking.findById(id);
+    if (!booking) return res.status(404).json({ error: "Booking not found." });
+
+    booking.status = status;
+    await booking.save();
+
+    return res.status(200).json({ success: true, data: booking.toJSON() });
+  } catch (err: any) {
+    console.error("Error in updateBookingStatus:", err);
+    return res.status(500).json({ error: err.message || "Failed to update booking status." });
+  }
+}
+
 /** POST /api/expenses - log a new expense (management only, same as before). */
 export async function createExpense(req: Request, res: Response) {
   try {
