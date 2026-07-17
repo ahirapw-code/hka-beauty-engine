@@ -127,6 +127,39 @@ export default function ERP({
     setSavingEdit(true);
     try {
       await onUpdateUserRole(editingUserId, editRole, editBranch);
+
+      // Promoting/re-assigning an EXISTING account to SALON_MANAGER through
+      // this inline editor bypasses handleRegisterUser above entirely, so
+      // it also needs to make sure this manager has a row in the "Managers"
+      // payroll-rate Google Sheet tab - otherwise the promotion never
+      // becomes visible to Google Sheets sync and HKA_MANAGEMENT has no row
+      // to set their commissionRate/baseSalary from (see appendManagerStubRow
+      // / MANAGERS_SHEET_HEADERS in src/lib/googleSheets.ts). This mirrors
+      // the same best-effort call handleRegisterUser makes for brand new
+      // Salon Manager accounts, and is safe to call every time someone is
+      // (re)saved as SALON_MANAGER - appendManagerStubRow is idempotent and
+      // skips creating a row if one already exists for this id.
+      if (editRole === 'SALON_MANAGER') {
+        const spreadsheetId = localStorage.getItem('hka_sheets_spreadsheet_id');
+        const appsScriptUrl = localStorage.getItem('hka_sheets_apps_script_url');
+        if (spreadsheetId) {
+          const editedUser = usersList.find(u => u.id === editingUserId);
+          try {
+            await appendManagerStubRow(spreadsheetId, getCachedToken(), appsScriptUrl, {
+              id: editingUserId,
+              name: editedUser?.name || editingUserId,
+              branch: editBranch,
+            });
+          } catch (managerSheetErr) {
+            console.error('Failed to add manager row to Google Sheets: ', managerSheetErr);
+            alert(
+              `Role/branch berhasil diperbarui, tapi baris di tab Managers Google Sheet gagal ditambahkan otomatis. ` +
+              `Tambahkan manual (id: ${editingUserId}) di tab Managers untuk mengatur komisi/gaji.`
+            );
+          }
+        }
+      }
+
       setEditingUserId(null);
     } catch (err: any) {
       console.error('Failed to update user role/branch: ', err);
