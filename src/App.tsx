@@ -25,7 +25,8 @@ import {
   addExpense,
   addAttendance,
   updateAttendance,
-  activateMembership
+  activateMembership,
+  addTherapist
 } from './lib/firestoreService';
 import Login from './components/Login';
 import Sidebar from './components/Sidebar';
@@ -670,6 +671,10 @@ export default function App() {
               } catch (err) {
                 console.error("Error deleting user from Firestore: ", err);
               }
+            }}
+            onAddTherapist={async (newTherapist) => {
+              const created = await addTherapist(newTherapist);
+              setTherapists(prev => [...prev, created]);
             }}
           />
         );
