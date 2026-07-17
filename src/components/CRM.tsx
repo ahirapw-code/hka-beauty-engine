@@ -1,20 +1,22 @@
 import React, { useState, useMemo } from 'react';
 import { User, Branch, Customer } from '../types';
-import { formatIDR } from '../utils';
-import { Users, Search, UserPlus, Phone, Mail, Award, History, Landmark } from 'lucide-react';
+import { formatIDR, getMembershipTier, visitsUntilNextTier, MEMBERSHIP_TIERS, MEMBERSHIP_DISCOUNT_PERCENT } from '../utils';
+import { Users, Search, UserPlus, Phone, Mail, Award, History, Landmark, Sparkles, Gift } from 'lucide-react';
 
 interface CRMProps {
   user: User;
   selectedBranch: Branch;
   customers: Customer[];
   onAddCustomer: (customer: Omit<Customer, 'id' | 'totalSpend' | 'visitsCount'>) => void;
+  onActivateMembership: (customerId: string) => void;
 }
 
 export default function CRM({
   user,
   selectedBranch,
   customers,
-  onAddCustomer
+  onAddCustomer,
+  onActivateMembership
 }: CRMProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddCustomer, setShowAddCustomer] = useState(false);
@@ -27,6 +29,7 @@ export default function CRM({
     user.branch === 'ALL' ? 'NAO_STUDIO' : user.branch as 'NAO_STUDIO' | 'DIAEL_BEAUTY'
   );
   const [notes, setNotes] = useState('');
+  const [registerAsMember, setRegisterAsMember] = useState(false);
 
   // Handle active branch filtering
   const activeBranchFilter = user.role === 'SALON_MANAGER' ? user.branch : selectedBranch;
@@ -51,7 +54,9 @@ export default function CRM({
       email: email || `${name.toLowerCase().replace(/\s+/g, '')}@hka.com`,
       phone,
       preferredBranch,
-      notes: notes || 'Regular customer'
+      notes: notes || 'Regular customer',
+      isMember: registerAsMember,
+      memberSince: registerAsMember ? new Date().toISOString().substring(0, 10) : undefined
     });
 
     // Reset Form
@@ -59,6 +64,7 @@ export default function CRM({
     setEmail('');
     setPhone('');
     setNotes('');
+    setRegisterAsMember(false);
     setShowAddCustomer(false);
   };
 
@@ -101,7 +107,12 @@ export default function CRM({
           {filteredCustomers.length === 0 ? (
             <div className="text-center py-12 text-slate-400 text-xs font-mono">No client accounts found.</div>
           ) : (
-            filteredCustomers.map((cust) => (
+            filteredCustomers.map((cust) => {
+              const tier = getMembershipTier(cust.visitsCount);
+              const tierInfo = MEMBERSHIP_TIERS[tier];
+              const nextTier = visitsUntilNextTier(cust.visitsCount);
+
+              return (
               <div key={cust.id} className="p-4 bg-slate-50/50 hover:bg-[#FDFBF7] border border-slate-100 hover:border-[#D4AF37]/30 rounded-2xl transition-all space-y-3 shadow-xs">
                 {/* Header info */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -110,7 +121,15 @@ export default function CRM({
                       {cust.name.split(' ').map(n => n.charAt(0)).join('')}
                     </div>
                     <div>
-                      <h4 className="text-sm font-bold text-slate-900">{cust.name}</h4>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <h4 className="text-sm font-bold text-slate-900">{cust.name}</h4>
+                        {cust.isMember && (
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-mono font-bold uppercase flex items-center gap-1 ${tierInfo.badgeClass}`}>
+                            <Sparkles className="w-2.5 h-2.5" />
+                            {tierInfo.label} Member
+                          </span>
+                        )}
+                      </div>
                       <span className="text-[10px] text-slate-400 font-mono">Preferred: {cust.preferredBranch === 'NAO_STUDIO' ? 'NAO Studio' : 'DIAEL Beauty Center'}</span>
                     </div>
                   </div>
@@ -127,6 +146,35 @@ export default function CRM({
                     </div>
                   </div>
                 </div>
+
+                {/* Membership status row */}
+                {cust.isMember ? (
+                  <div className="bg-[#FDFBF7] border border-[#D4AF37]/20 rounded-xl p-2.5 flex items-start gap-2">
+                    <Gift className="w-3.5 h-3.5 text-[#D4AF37] shrink-0 mt-0.5" />
+                    <div className="text-[10px] text-slate-600 leading-relaxed">
+                      <span className="font-bold text-slate-800">Diskon otomatis {MEMBERSHIP_DISCOUNT_PERCENT}%</span> aktif setiap transaksi.{' '}
+                      {nextTier ? (
+                        <span>
+                          {nextTier.visitsRemaining} kunjungan lagi menuju tier{' '}
+                          <span className="font-bold">{MEMBERSHIP_TIERS[nextTier.nextTier].label}</span> (gift/voucher diberikan manual oleh outlet).
+                        </span>
+                      ) : (
+                        <span>Sudah mencapai tier tertinggi (Platinum).</span>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between gap-2 bg-slate-100/70 rounded-xl p-2.5">
+                    <span className="text-[10px] text-slate-500">Belum terdaftar sebagai member.</span>
+                    <button
+                      onClick={() => onActivateMembership(cust.id)}
+                      className="px-2.5 py-1 bg-[#1a1c1e] hover:bg-slate-800 text-[#D4AF37] text-[10px] font-bold rounded-lg cursor-pointer transition-all flex items-center gap-1 shrink-0"
+                    >
+                      <Sparkles className="w-3 h-3" />
+                      Jadikan Member
+                    </button>
+                  </div>
+                )}
 
                 {/* Sub row of contacts & notes */}
                 <div className="pt-2.5 border-t border-slate-100 flex flex-col md:flex-row gap-4 justify-between">
@@ -147,7 +195,8 @@ export default function CRM({
                   </div>
                 </div>
               </div>
-            ))
+              );
+            })
           )}
         </div>
       </div>
@@ -224,6 +273,18 @@ export default function CRM({
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs px-3 py-2 text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#D4AF37]"
                 />
               </div>
+
+              <label className="flex items-center gap-2.5 bg-[#FDFBF7] border border-[#D4AF37]/30 rounded-xl px-3 py-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={registerAsMember}
+                  onChange={(e) => setRegisterAsMember(e.target.checked)}
+                  className="w-4 h-4 accent-[#D4AF37] cursor-pointer"
+                />
+                <span className="text-[10px] text-slate-700 leading-snug">
+                  <span className="font-bold">Daftarkan sebagai Member (Basic)</span> — otomatis dapat diskon 5% setiap transaksi. Naik ke Silver/Gold/Platinum otomatis berdasarkan jumlah kunjungan.
+                </span>
+              </label>
 
               <button
                 type="submit"

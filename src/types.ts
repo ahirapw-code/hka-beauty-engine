@@ -57,6 +57,11 @@ export interface Customer {
   lastVisit?: string;
   notes?: string;
   preferredBranch: Exclude<Branch, 'ALL'>;
+  // Membership marker - once true, customer auto-gets a 5% discount at
+  // checkout. Tier (Basic/Silver/Gold/Platinum) is NOT stored here, it's
+  // derived from visitsCount - see getMembershipTier() in utils.ts.
+  isMember?: boolean;
+  memberSince?: string; // YYYY-MM-DD
 }
 
 export interface Booking {
@@ -93,6 +98,9 @@ export interface Transaction {
   }>;
   subtotal: number;
   discount: number;
+  // Portion of `discount` that came from the automatic membership discount,
+  // kept separately for receipt display/reporting purposes.
+  membershipDiscount?: number;
   total: number;
   paymentMethod: 'cash' | 'card' | 'bank_transfer' | 'e_wallet';
   date: string; // YYYY-MM-DDTHH:MM:SS

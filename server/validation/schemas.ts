@@ -133,6 +133,13 @@ export const customerCreateSchema = z.object({
   totalSpend: z.number().finite().min(0).optional(),
   visitsCount: z.number().int().min(0).optional(),
   lastVisit: z.string().optional(),
+  // Membership marker - normally set via the dedicated
+  // PATCH /api/customers/:id/membership endpoint (recordsController.ts),
+  // but accepted here too in case a management-only future write path
+  // needs it (this schema currently only guards the write-locked generic
+  // /api/data/customers route, which is 403'd for everyone).
+  isMember: z.boolean().optional(),
+  memberSince: z.string().optional(),
 });
 
 // PATCH (partial update) allows any subset of the same fields.

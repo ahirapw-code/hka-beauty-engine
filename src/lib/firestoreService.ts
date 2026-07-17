@@ -82,6 +82,33 @@ export async function addCustomer(customer: Customer): Promise<void> {
   }
 }
 
+// 1b. ACTIVATE MEMBERSHIP (Basic tier registration by kasir/therapist)
+// "customers" is write-locked in the generic /api/data API (managed via
+// Google Sheets), so this goes through its own narrow, dedicated endpoint
+// - same carve-out pattern as updateBookingStatus below. It only ever
+// turns membership ON; it's idempotent if the customer is already a member.
+export async function activateMembership(customerId: string): Promise<Customer> {
+  const path = `customers/${customerId}/membership`;
+  try {
+    const idToken = await auth.currentUser?.getIdToken();
+    const response = await fetch(`/api/customers/${customerId}/membership`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {})
+      }
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || `Failed to activate membership (status ${response.status})`);
+    }
+    return data.data as Customer;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+    throw error;
+  }
+}
+
 // 2. ADD BOOKING
 export async function addBooking(booking: Booking): Promise<Booking> {
   const path = `bookings/${booking.id}`;

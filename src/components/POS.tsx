@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { User, Branch, Customer, Service, Product, Therapist, Transaction, BranchProfile } from '../types';
-import { formatIDR } from '../utils';
+import { formatIDR, getMembershipTier, visitsUntilNextTier, MEMBERSHIP_TIERS, MEMBERSHIP_DISCOUNT_PERCENT } from '../utils';
 import { doc, getDoc } from '../lib/firestoreClient';
 import { db } from '../lib/firebase';
 import InvoiceTemplate from './InvoiceTemplate';
@@ -20,7 +20,8 @@ import {   Plus,
   Download,
   ExternalLink,
   MessageSquare,
-  Loader2
+  Loader2,
+  Sparkles
 } from 'lucide-react';
 
 
@@ -37,6 +38,7 @@ interface POSProps {
     invoiceDiscountType?: 'percent' | 'flat'
   ) => Promise<string>;
   onAddCustomer: (customer: Omit<Customer, 'id' | 'totalSpend' | 'visitsCount'>) => void;
+  onActivateMembership: (customerId: string) => void;
 }
 
 export default function POS({
@@ -47,7 +49,8 @@ export default function POS({
   products,
   therapists,
   onAddTransaction,
-  onAddCustomer
+  onAddCustomer,
+  onActivateMembership
 }: POSProps) {
   // POS branch is locked if Salon Manager, otherwise relies on HKA selector or POS-specific override
   const [posBranch, setPosBranch] = useState<'NAO_STUDIO' | 'DIAEL_BEAUTY'>(
@@ -263,6 +266,12 @@ export default function POS({
     );
   }, [activeServices, activeProducts, searchQuery]);
 
+  // The currently selected customer record - drives the membership badge
+  // and the automatic 5% discount below.
+  const selectedCustomer = useMemo(() => {
+    return customers.find(c => c.id === selectedCustomerId) || activeCustomers[0];
+  }, [customers, selectedCustomerId, activeCustomers]);
+
   // Calculations
   const subtotal = useMemo(() => {
     return cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
@@ -292,9 +301,19 @@ export default function POS({
     }
   }, [intermediateSubtotal, invoiceDiscountValue, invoiceDiscountType]);
 
+  // Automatic membership discount - mirrors checkoutController.ts exactly
+  // (same base, same %) purely so the on-screen preview/receipt matches
+  // what the server will actually charge. The server recalculates this
+  // itself from the customer record and is the source of truth; this is
+  // only a client-side preview.
+  const membershipDiscountAmount = useMemo(() => {
+    if (!selectedCustomer?.isMember) return 0;
+    return (intermediateSubtotal * MEMBERSHIP_DISCOUNT_PERCENT) / 100;
+  }, [selectedCustomer, intermediateSubtotal]);
+
   const totalDiscount = useMemo(() => {
-    return itemDiscountsTotal + invoiceDiscountAmount;
-  }, [itemDiscountsTotal, invoiceDiscountAmount]);
+    return itemDiscountsTotal + invoiceDiscountAmount + membershipDiscountAmount;
+  }, [itemDiscountsTotal, invoiceDiscountAmount, membershipDiscountAmount]);
 
   const total = useMemo(() => {
     const val = subtotal - totalDiscount;
@@ -355,7 +374,7 @@ export default function POS({
     if (isCheckingOut) return; // prevent double-submit from a double-tap/click
     setIsCheckingOut(true);
 
-    const customer = customers.find(c => c.id === selectedCustomerId) || activeCustomers[0];
+    const customer = selectedCustomer;
     if (!customer) {
       setIsCheckingOut(false);
       return;
@@ -377,6 +396,7 @@ export default function POS({
       })),
       subtotal,
       discount: totalDiscount,
+      membershipDiscount: membershipDiscountAmount,
       total,
       paymentMethod,
       cashierName: user.name
@@ -584,6 +604,7 @@ export default function POS({
           {/* Customer Select / Add Section */}
           <div className="py-4 border-b border-slate-800 shrink-0">
             {!showAddCustomer ? (
+              <>
               <div className="flex items-center gap-2">
                 <div className="flex-1">
                   <label className="text-[10px] text-slate-400 font-mono block mb-1">CUSTOMER FOR SALE</label>
@@ -605,6 +626,31 @@ export default function POS({
                   <UserPlus className="w-4 h-4" />
                 </button>
               </div>
+
+              {/* Membership status for the selected customer */}
+              {selectedCustomer && (
+                selectedCustomer.isMember ? (
+                  <div className="mt-2 flex items-center gap-1.5 bg-[#D4AF37]/10 border border-[#D4AF37]/30 rounded-lg px-2.5 py-1.5">
+                    <Sparkles className="w-3 h-3 text-[#D4AF37] shrink-0" />
+                    <span className="text-[10px] text-[#D4AF37] font-bold font-mono uppercase">
+                      {MEMBERSHIP_TIERS[getMembershipTier(selectedCustomer.visitsCount)].label} Member
+                    </span>
+                    <span className="text-[10px] text-slate-400">· Diskon {MEMBERSHIP_DISCOUNT_PERCENT}% otomatis diterapkan</span>
+                  </div>
+                ) : (
+                  <div className="mt-2 flex items-center justify-between gap-2 bg-slate-800/50 border border-slate-700/50 rounded-lg px-2.5 py-1.5">
+                    <span className="text-[10px] text-slate-400">Bukan member</span>
+                    <button
+                      onClick={() => onActivateMembership(selectedCustomer.id)}
+                      className="text-[10px] font-bold text-[#D4AF37] hover:text-amber-400 cursor-pointer flex items-center gap-1"
+                    >
+                      <Sparkles className="w-3 h-3" />
+                      Jadikan Member
+                    </button>
+                  </div>
+                )
+              )}
+              </>
             ) : (
               <form onSubmit={handleCreateCustomerSubmit} className="space-y-2 bg-slate-800/50 p-3 rounded-2xl border border-slate-700/60">
                 <div className="flex items-center justify-between">
@@ -802,6 +848,12 @@ export default function POS({
                 <div className="flex justify-between">
                   <span>Invoice Discount:</span>
                   <span className="text-rose-400">-{formatIDR(invoiceDiscountAmount)}</span>
+                </div>
+              )}
+              {membershipDiscountAmount > 0 && (
+                <div className="flex justify-between">
+                  <span className="flex items-center gap-1"><Sparkles className="w-3 h-3 text-[#D4AF37]" />Membership Discount ({MEMBERSHIP_DISCOUNT_PERCENT}%):</span>
+                  <span className="text-rose-400">-{formatIDR(membershipDiscountAmount)}</span>
                 </div>
               )}
               {totalDiscount > 0 && (

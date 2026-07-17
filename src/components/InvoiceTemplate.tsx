@@ -76,9 +76,12 @@ export default function InvoiceTemplate({ transaction, branchProfile }: InvoiceT
     };
   });
 
-  // Invoice-level discount (the remainder of total discount minus item discounts)
+  // Invoice-level discount (the remainder of total discount minus item
+  // discounts and the automatic membership discount, which each get their
+  // own line below for transparency).
   const totalDiscount = transaction.discount;
-  const invoiceLevelDiscount = Math.max(0, totalDiscount - totalItemDiscounts);
+  const membershipDiscount = transaction.membershipDiscount || 0;
+  const invoiceLevelDiscount = Math.max(0, totalDiscount - totalItemDiscounts - membershipDiscount);
 
   const handlePrint = () => {
     const printContent = document.getElementById(`printable-invoice-${transaction.id}`);
@@ -247,6 +250,13 @@ export default function InvoiceTemplate({ transaction, branchProfile }: InvoiceT
             <div className="flex justify-between text-rose-600">
               <span>Total Diskon Item:</span>
               <span>-{formatIDR(totalItemDiscounts)}</span>
+            </div>
+          )}
+
+          {membershipDiscount > 0 && (
+            <div className="flex justify-between text-rose-600">
+              <span>Diskon Membership:</span>
+              <span>-{formatIDR(membershipDiscount)}</span>
             </div>
           )}
 

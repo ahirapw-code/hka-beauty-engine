@@ -24,7 +24,8 @@ import {
   restockProduct,
   addExpense,
   addAttendance,
-  updateAttendance
+  updateAttendance,
+  activateMembership
 } from './lib/firestoreService';
 import Login from './components/Login';
 import Sidebar from './components/Sidebar';
@@ -430,6 +431,20 @@ export default function App() {
     }
   };
 
+  // 2b. Mark an existing customer as a member (Basic tier) - done by a
+  // kasir/therapist from CRM or POS. Optimistically updates local state so
+  // the discount/tier badge shows immediately, rather than waiting for the
+  // next onSnapshot poll cycle.
+  const handleActivateMembership = async (customerId: string) => {
+    try {
+      const updated = await activateMembership(customerId);
+      setCustomers(prev => prev.map(c => (c.id === customerId ? { ...c, ...updated } : c)));
+    } catch (err) {
+      console.error("Error activating membership: ", err);
+      alert(err instanceof Error ? err.message : 'Gagal mengaktifkan membership. Silakan coba lagi.');
+    }
+  };
+
   const timeToMinutes = (timeStr: string): number => {
     const [h, m] = timeStr.split(':').map(Number);
     return h * 60 + m;
@@ -618,6 +633,7 @@ export default function App() {
             therapists={therapists}
             onAddTransaction={handleAddTransaction}
             onAddCustomer={handleAddCustomer}
+            onActivateMembership={handleActivateMembership}
           />
         );
       case 'bookings':
@@ -664,6 +680,7 @@ export default function App() {
             selectedBranch={selectedBranch}
             customers={customers}
             onAddCustomer={handleAddCustomer}
+            onActivateMembership={handleActivateMembership}
           />
         );
       case 'attendance':

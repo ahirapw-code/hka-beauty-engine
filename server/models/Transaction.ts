@@ -21,6 +21,10 @@ export interface ITransaction extends Document<string> {
   items: ITransactionItem[];
   subtotal: number;
   discount: number;
+  // Portion of `discount` that came from the automatic 5% membership
+  // discount (as opposed to item/invoice discounts entered manually) -
+  // kept separately purely for reporting/audit purposes.
+  membershipDiscount?: number;
   total: number;
   paymentMethod: "cash" | "card" | "bank_transfer" | "e_wallet";
   date: string;
@@ -50,6 +54,7 @@ const TransactionSchema = new Schema<ITransaction>(
     items: { type: [TransactionItemSchema], default: [] },
     subtotal: { type: Number, required: true },
     discount: { type: Number, default: 0 },
+    membershipDiscount: { type: Number, default: 0 },
     total: { type: Number, required: true },
     paymentMethod: {
       type: String,

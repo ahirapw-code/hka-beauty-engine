@@ -14,6 +14,13 @@ const VALID_PAYMENT_METHODS = ["cash", "card", "bank_transfer", "e_wallet"];
 const VALID_DISCOUNT_TYPES = ["percent", "flat"];
 const MAX_QUANTITY_PER_LINE = 999; // sanity ceiling, not a real business limit
 
+// Automatic loyalty perk: any customer flagged isMember gets this % off
+// on top of whatever manual item/invoice discounts are applied. Computed
+// here server-side (never trusted from the client) so it can't be spoofed
+// by a tampered checkout request, matching the rest of this endpoint's
+// "recalculate everything from the DB" model.
+const MEMBERSHIP_DISCOUNT_PERCENT = 5;
+
 function isPositiveInteger(n: any): boolean {
   return typeof n === "number" && Number.isInteger(n) && n > 0 && n <= MAX_QUANTITY_PER_LINE;
 }
@@ -307,7 +314,15 @@ export async function processCheckout(req: Request, res: Response) {
             invoiceDiscountAmount = Math.min(invoiceDiscValue, intermediateSubtotal);
           }
 
-          const totalDiscount = itemDiscountsTotal + invoiceDiscountAmount;
+          // Automatic membership discount - derived solely from the
+          // customer record we just read inside this transaction, never
+          // from anything the client sent, so it can't be forged and
+          // always reflects the customer's actual current membership flag.
+          const membershipDiscountAmount = customerDoc?.isMember
+            ? (intermediateSubtotal * MEMBERSHIP_DISCOUNT_PERCENT) / 100
+            : 0;
+
+          const totalDiscount = itemDiscountsTotal + invoiceDiscountAmount + membershipDiscountAmount;
           const finalTotal = Math.max(0, recalculatedSubtotal - totalDiscount);
 
           // --- Perform writes (all on the single shared session: any error
@@ -374,6 +389,7 @@ export async function processCheckout(req: Request, res: Response) {
                 items: verifiedItems,
                 subtotal: recalculatedSubtotal,
                 discount: totalDiscount,
+                membershipDiscount: membershipDiscountAmount,
                 total: finalTotal,
                 paymentMethod,
                 date: dateStr,

@@ -5,6 +5,7 @@ import User from "../models/User.js";
 import Booking from "../models/Booking.js";
 import Expense from "../models/Expense.js";
 import Payroll from "../models/Payroll.js";
+import Customer from "../models/Customer.js";
 
 /**
  * These endpoints exist because customers/products/services/bookings/
@@ -66,6 +67,46 @@ export async function updateBookingStatus(req: Request, res: Response) {
   } catch (err: any) {
     console.error("Error in updateBookingStatus:", err);
     return res.status(500).json({ error: err.message || "Failed to update booking status." });
+  }
+}
+
+/**
+ * PATCH /api/customers/:id/membership - the membership equivalent of the
+ * booking-status carve-out above: "customers" is otherwise write-locked
+ * (managed through Google Sheets), but registering a walk-in/existing
+ * customer as a Basic member is a real-world front-desk action performed
+ * by a kasir or therapist at the point of sale, not a spreadsheet edit.
+ * This endpoint only ever flips isMember on (never off) and stamps
+ * memberSince once - it does not touch any other customer field, and it
+ * is idempotent (calling it again on an existing member is a no-op).
+ * Tier (Basic/Silver/Gold/Platinum) is derived from visitsCount on the
+ * frontend and is not stored - once isMember is true, tier upgrades
+ * automatically as the customer's visitsCount grows through checkout.
+ */
+export async function activateMembership(req: Request, res: Response) {
+  try {
+    const role = await getCallerRole(req);
+    if (!role) return res.status(401).json({ error: "Unauthorized." });
+    // Any authenticated staff role may register a client as a member -
+    // this happens at the front desk/POS by whoever is on shift.
+    if (!["HKA_MANAGEMENT", "SALON_MANAGER", "THERAPIST"].includes(role)) {
+      return res.status(403).json({ error: "Forbidden: your role may not register memberships." });
+    }
+
+    const { id } = req.params;
+    const customer = await Customer.findById(id);
+    if (!customer) return res.status(404).json({ error: "Customer not found." });
+
+    if (!customer.isMember) {
+      customer.isMember = true;
+      customer.memberSince = new Date().toISOString().substring(0, 10);
+      await customer.save();
+    }
+
+    return res.status(200).json({ success: true, data: customer.toJSON() });
+  } catch (err: any) {
+    console.error("Error in activateMembership:", err);
+    return res.status(500).json({ error: err.message || "Failed to activate membership." });
   }
 }
 
