@@ -23,14 +23,14 @@ const SHEETS_SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.
 // separate from the "Users" tab and from the generic bidirectional data
 // engine in this file (readAllDataFromSpreadsheet / writeAllDataToSpreadsheet
 // / syncStateToSpreadsheetIncremental all skip it on purpose): it exists
-// purely so HKA_MANAGEMENT can set commissionRate/baseSalary for Salon
-// Manager accounts from a spreadsheet, the same way the "Therapists" tab's
-// commissionRate/baseSalary columns work - read one-way, audited, via
+// purely so HKA_MANAGEMENT can set commissionRate/baseSalary/monthlyTarget
+// for Salon Manager accounts from a spreadsheet, the same way the
+// "Therapists" tab's equivalent columns work - read one-way, audited, via
 // POST /api/syncSheetsToFirestore (server/controllers/googleSheetsController.ts),
 // never written back to here and never touching any other User field
 // (role/branch/email/password stay fully out of Sheets, see
 // sheetsPersistController.ts).
-export const MANAGERS_SHEET_HEADERS = ['id', 'name', 'branch', 'commissionRate', 'baseSalary', 'status'];
+export const MANAGERS_SHEET_HEADERS = ['id', 'name', 'branch', 'commissionRate', 'baseSalary', 'status', 'monthlyTarget'];
 
 let cachedAccessToken: string | null = null;
 let cachedUser: GoogleSheetsUser | null = null;
@@ -206,7 +206,7 @@ export const ensureSheetsExist = async (spreadsheetId: string, accessToken: stri
       // other tab its header row is never written by the normal sync loop.
       // Write it once here, right after the blank tab is created.
       if (missingTitles.includes('Managers')) {
-        await fetchWithRetry(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Managers!A1:F1?valueInputOption=RAW`, {
+        await fetchWithRetry(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Managers!A1:G1?valueInputOption=RAW`, {
           method: 'PUT',
           headers: {
             Authorization: `Bearer ${accessToken}`,
@@ -846,18 +846,19 @@ export const syncStateToSpreadsheetIncremental = async (
 };
 
 /**
- * Appends a stub row (id, name, branch, blank commissionRate/baseSalary,
- * status) to the "Managers" payroll-rate tab for a newly-registered (or
- * newly-promoted) Salon Manager.
+ * Appends a stub row (id, name, branch, blank commissionRate/baseSalary/
+ * monthlyTarget, status) to the "Managers" payroll-rate tab for a
+ * newly-registered (or newly-promoted) Salon Manager.
  *
  * Without this, the Managers tab (see MANAGERS_SHEET_HEADERS above) never
  * gets a row for a new manager on its own - it's intentionally excluded
  * from the generic bidirectional sync engine, and HKA_MANAGEMENT has no
  * practical way to discover the manager's auto-generated id to type into
  * the sheet by hand. This gives them a ready-made row with the correct id
- * pre-filled; commissionRate/baseSalary are left blank for them to fill in,
- * and syncSheetsToFirestore (server/controllers/googleSheetsController.ts)
- * picks those up the same audited way it already does for existing rows.
+ * pre-filled; commissionRate/baseSalary/monthlyTarget are left blank for
+ * them to fill in, and syncSheetsToFirestore
+ * (server/controllers/googleSheetsController.ts) picks those up the same
+ * audited way it already does for existing rows.
  *
  * Best-effort by design: called right after a manager's account is created,
  * from a context where a failure here must never be treated as the
@@ -886,7 +887,7 @@ export const appendManagerStubRow = async (
   } else {
     if (!accessToken) throw new Error('SESSION_EXPIRED');
     const res = await fetchWithRetry(
-      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Managers!A1:F`,
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Managers!A1:G`,
       { headers: { Authorization: `Bearer ${accessToken}` } }
     );
     if (!res.ok) throw new Error(`Sheets API fetch failed: ${res.statusText}`);
@@ -900,14 +901,14 @@ export const appendManagerStubRow = async (
   if (dataRows.some((row) => row[0] === manager.id)) return;
 
   const N = existingRows.length; // includes header row, if any
-  const newRow = [manager.id, manager.name, manager.branch, '', '', 'active'];
+  const newRow = [manager.id, manager.name, manager.branch, '', '', 'active', ''];
   const updates: { sheet: string; range: string; values: any[][] }[] = [];
 
   if (N === 0) {
-    updates.push({ sheet: 'Managers', range: 'Managers!A1:F1', values: [MANAGERS_SHEET_HEADERS] });
-    updates.push({ sheet: 'Managers', range: 'Managers!A2:F2', values: [newRow] });
+    updates.push({ sheet: 'Managers', range: 'Managers!A1:G1', values: [MANAGERS_SHEET_HEADERS] });
+    updates.push({ sheet: 'Managers', range: 'Managers!A2:G2', values: [newRow] });
   } else {
-    updates.push({ sheet: 'Managers', range: `Managers!A${N + 1}:F${N + 1}`, values: [newRow] });
+    updates.push({ sheet: 'Managers', range: `Managers!A${N + 1}:G${N + 1}`, values: [newRow] });
   }
 
   if (appsScriptUrl) {
