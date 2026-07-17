@@ -177,6 +177,21 @@ export const bookingStatusUpdateSchema = z.object({
   status: z.enum(BOOKING_STATUSES),
 });
 
+/**
+ * Used by POST /api/therapists (see recordsController.ts). Creates the
+ * Therapist collection record that makes someone schedulable/bookable and
+ * visible in the Therapists Google Sheet tab - a separate thing from their
+ * User login account. `linkedUserId` is set when this is the "therapist
+ * hat" of a dual-role Salon Manager (see server/models/Therapist.ts);
+ * left empty for an ordinary single-role therapist.
+ */
+export const therapistCreateSchema = z.object({
+  name: z.string().min(1, "Name is required."),
+  branch: z.enum(BRANCHES, { errorMap: () => ({ message: "Invalid branch." }) }),
+  specialties: z.array(z.string()).optional(),
+  linkedUserId: z.string().optional(),
+});
+
 /* ------------------------------------------------------------------ */
 /* Product (collection: "products")                                     */
 /* ------------------------------------------------------------------ */
