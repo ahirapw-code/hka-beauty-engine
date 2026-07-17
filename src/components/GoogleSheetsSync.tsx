@@ -4,6 +4,7 @@ import {
   googleSignOut, 
   findOrCreateDatabase, 
   syncStateToSpreadsheetIncremental,
+  appendManagerStubRow,
   initAuth
 } from '../lib/googleSheets';
 import { Customer, Booking, Transaction, Therapist, Product, Service, Expense, Attendance, User } from '../types';
@@ -317,6 +318,37 @@ export default function GoogleSheetsSync({
       const timeString = new Date().toLocaleTimeString();
       setLastSynced(timeString);
       localStorage.setItem('hka_sheets_last_synced', timeString);
+
+      // Backfill: make sure every current SALON_MANAGER has a row in the
+      // "Managers" payroll-rate tab. This tab is intentionally excluded
+      // from the generic bidirectional engine above (see
+      // MANAGERS_SHEET_HEADERS in src/lib/googleSheets.ts), so a manager
+      // account promoted before this stub-row logic existed - or whose
+      // one-off write at registration/promotion time failed - would
+      // otherwise be stuck with no row to ever set commissionRate/
+      // baseSalary from, with no way to notice short of opening the sheet.
+      // appendManagerStubRow is idempotent (skips ids that already have a
+      // row), so it's safe to run this against every SALON_MANAGER on
+      // every sync. Restricted to HKA_MANAGEMENT, matching who's allowed
+      // to actually run the payroll-sensitive Sheets->DB sync.
+      if (isHQManagement) {
+        const currentManagers = latestDataRef.current.users.filter(u => u.role === 'SALON_MANAGER');
+        for (const manager of currentManagers) {
+          try {
+            await appendManagerStubRow(spreadsheetId, token, appsScriptUrl, {
+              id: manager.id,
+              name: manager.name,
+              branch: manager.branch,
+            });
+          } catch (managerBackfillErr: any) {
+            console.error(`Failed to backfill Managers sheet row for ${manager.name}: `, managerBackfillErr);
+            setConflictLogs(prev => [
+              ...prev,
+              `Gagal menambahkan baris tab Managers untuk ${manager.name}: ${managerBackfillErr.message || managerBackfillErr}`,
+            ]);
+          }
+        }
+      }
 
       // Persist the reconciled dataset to MongoDB. Without this, the merge
       // above only lives in React state - a refresh (or anyone else's
