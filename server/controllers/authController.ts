@@ -54,17 +54,34 @@ export async function register(req: Request, res: Response) {
     // through the authorized profile-update flow, so these are only ever
     // visible for the instant between the two calls - but even so, they are
     // now hardcoded server-side rather than accepted from the client.
-    const newUser = await User.create({
-      _id: uid,
-      username: String(fallbackUsername).trim().toLowerCase(),
-      name: fallbackUsername,
-      role: "THERAPIST",
-      branch: "NAO_STUDIO",
-      email: normalizedEmail,
-      passwordHash,
-      avatar: `https://i.pravatar.cc/150?u=${fallbackUsername}`,
-      forcePasswordChange: false,
-    });
+    let newUser;
+    try {
+      newUser = await User.create({
+        _id: uid,
+        username: String(fallbackUsername).trim().toLowerCase(),
+        name: fallbackUsername,
+        role: "THERAPIST",
+        branch: "NAO_STUDIO",
+        email: normalizedEmail,
+        passwordHash,
+        avatar: `https://i.pravatar.cc/150?u=${fallbackUsername}`,
+        forcePasswordChange: false,
+      });
+    } catch (createErr: any) {
+      // The findOne() check above has a race window: two near-simultaneous
+      // register requests for the same email (e.g. a double-click, or a
+      // retried request after a slow/dropped response) can both pass it
+      // before either write commits, which previously created two separate
+      // accounts sharing one email - the exact "double manager" bug this
+      // comment is here to prevent. The `email` field's unique index is the
+      // actual backstop: a duplicate-key error (code 11000) here means the
+      // race happened and the other request won, so this one should fail
+      // the same clean way findOne() would have caught it.
+      if (createErr?.code === 11000) {
+        return res.status(409).json({ error: "This email address is already registered. Please sign in instead." });
+      }
+      throw createErr;
+    }
 
     const token = signToken(uid, normalizedEmail);
     return res.status(201).json({ token, user: newUser.toJSON() });
