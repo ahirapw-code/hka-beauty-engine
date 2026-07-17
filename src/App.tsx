@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Menu } from 'lucide-react';
 import { onAuthStateChanged } from './lib/authClient';
-import { doc, getDoc, collection, getDocs, deleteDoc, onSnapshot } from './lib/firestoreClient';
+import { doc, getDoc, collection, getDocs, deleteDoc, updateDoc, onSnapshot } from './lib/firestoreClient';
 import { auth, db } from './lib/firebase';
 import { 
   User, 
@@ -671,6 +671,10 @@ export default function App() {
               } catch (err) {
                 console.error("Error deleting user from Firestore: ", err);
               }
+            }}
+            onUpdateUserRole={async (userId, role, branch) => {
+              await updateDoc(doc(db, 'users', userId), { role, branch });
+              setUsersList(prev => prev.map(u => (u.id === userId ? { ...u, role, branch } : u)));
             }}
             onAddTherapist={async (newTherapist) => {
               const created = await addTherapist(newTherapist);
