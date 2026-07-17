@@ -10,6 +10,11 @@ export interface User {
   email: string;
   avatar?: string;
   forcePasswordChange?: boolean;
+  // Payroll rate fields for SALON_MANAGER accounts - set via the
+  // "Managers" Google Sheets payroll sync, same mechanism as Therapist
+  // commissionRate/baseSalary. Not meaningful for other roles.
+  commissionRate?: number;
+  baseSalary?: number;
 }
 
 export interface Therapist {

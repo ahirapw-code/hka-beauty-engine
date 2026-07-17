@@ -12,6 +12,13 @@ export interface IUser extends Document<string> {
   passwordHash: string;
   avatar?: string;
   forcePasswordChange?: boolean;
+  // Payroll rate fields, meaningful only for SALON_MANAGER accounts.
+  // Mirrors Therapist.commissionRate/baseSalary - set via the same
+  // audited, HKA_MANAGEMENT-only Google Sheets payroll sync
+  // (see server/controllers/googleSheetsController.ts, "Managers" tab),
+  // never through the generic /api/data/users write path.
+  commissionRate?: number;
+  baseSalary?: number;
 }
 
 const UserSchema = new Schema<IUser>(
@@ -32,6 +39,8 @@ const UserSchema = new Schema<IUser>(
     passwordHash: { type: String, required: true, select: false },
     avatar: { type: String },
     forcePasswordChange: { type: Boolean, default: false },
+    commissionRate: { type: Number, default: 0 },
+    baseSalary: { type: Number, default: 0 },
   },
   baseSchemaOptions
 );

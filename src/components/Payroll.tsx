@@ -143,7 +143,7 @@ export default function PayrollComponent({ user, selectedBranch: initialBranch }
             } else {
               const daysPresent = await calculateStaffAttendance(manager.id, selectedMonth);
               previews[manager.id] = {
-                baseSalary: 0,
+                baseSalary: manager.baseSalary || 0,
                 commissionEarned: 0,
                 daysPresent
               };
@@ -187,7 +187,7 @@ export default function PayrollComponent({ user, selectedBranch: initialBranch }
       const input = manualInputs[staffId] || { bonus: 0, deductions: 0, commissionEarned: 0 };
       const preview = calculatedPreviews[staffId] || { baseSalary: 0, commissionEarned: 0, daysPresent: 0 };
 
-      const baseSalary = staffType === 'therapist' ? preview.baseSalary : 0;
+      const baseSalary = preview.baseSalary || 0;
       const commissionEarned = staffType === 'therapist' ? preview.commissionEarned : (input.commissionEarned || 0);
       const daysPresent = Math.round(preview.daysPresent);
 
@@ -690,7 +690,7 @@ export default function PayrollComponent({ user, selectedBranch: initialBranch }
                     const isSaved = !!existing;
                     const status = existing ? existing.status : 'preview';
                     
-                    const baseSalary = 0; // Fixed at 0
+                    const baseSalary = isSaved ? existing.baseSalary : (preview.baseSalary || 0);
                     const daysPresent = isSaved ? existing.daysPresent : preview.daysPresent;
                     
                     const input = manualInputs[manager.id] || { bonus: 0, deductions: 0, commissionEarned: 0 };
@@ -698,7 +698,7 @@ export default function PayrollComponent({ user, selectedBranch: initialBranch }
                     const commissionEarned = isSaved ? existing.commissionEarned : (input.commissionEarned || 0);
                     const bonus = input.bonus || 0;
                     const deductions = input.deductions || 0;
-                    const netPay = Math.max(0, commissionEarned + bonus - deductions);
+                    const netPay = Math.max(0, baseSalary + commissionEarned + bonus - deductions);
 
                     const isEditable = status === 'preview' || status === 'draft';
                     const isProcessing = isActionLoading === `draft_${manager.id}` || isActionLoading === `save_${manager.id}` || isActionLoading === `finalize_${manager.id}` || isActionLoading === `revert_${manager.id}` || isActionLoading === `pay_${manager.id}` || isActionLoading === `delete_${manager.id}`;
@@ -717,8 +717,11 @@ export default function PayrollComponent({ user, selectedBranch: initialBranch }
                         </td>
 
                         {/* Base Salary */}
-                        <td className="p-4 text-right font-mono text-slate-400 font-medium">
-                          {formatIDR(baseSalary)} (N/A)
+                        <td className="p-4 text-right font-mono text-slate-700 font-medium">
+                          {formatIDR(baseSalary)}
+                          {baseSalary === 0 && (
+                            <span className="block text-[9px] text-slate-400 font-mono normal-case">Belum diatur di sheet Managers</span>
+                          )}
                         </td>
 
                         {/* Manual Commission Input */}
@@ -736,6 +739,11 @@ export default function PayrollComponent({ user, selectedBranch: initialBranch }
                             </div>
                           ) : (
                             <span className="font-mono text-slate-700 font-bold">{formatIDR(commissionEarned)}</span>
+                          )}
+                          {!!manager.commissionRate && (
+                            <span className="block text-[9px] text-slate-400 font-mono mt-1">
+                              Rate acuan di sheet: {(manager.commissionRate * 100).toFixed(0)}%
+                            </span>
                           )}
                         </td>
 

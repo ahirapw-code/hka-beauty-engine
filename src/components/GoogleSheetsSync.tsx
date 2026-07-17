@@ -64,7 +64,14 @@ var SHEET_SCHEMAS = {
   'Products':    ['id','name','sku','price','cost','stock','minStock','branch','category'],
   'Expenses':    ['id','branch','category','amount','date','description'],
   'Attendance':  ['id','userId','userName','role','branch','date','clockIn','clockOut','status','notes'],
-  'Users':       ['id','username','name','role','branch','email','avatar']
+  'Users':       ['id','username','name','role','branch','email','avatar'],
+  // Payroll-rate tab for Salon Managers, mirrors the commissionRate/
+  // baseSalary columns on 'Therapists' - see MANAGERS_SHEET_HEADERS in
+  // src/lib/googleSheets.ts for the full rationale. Only 'id', 'name'
+  // (reference only), 'branch', 'commissionRate', 'baseSalary' and
+  // 'status' matter; nothing else about the manager account is read from
+  // or written to this tab.
+  'Managers':    ['id','name','branch','commissionRate','baseSalary','status']
 };
 
 function ensureSheets(ss) {

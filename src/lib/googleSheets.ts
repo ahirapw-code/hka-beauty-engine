@@ -19,6 +19,19 @@ export interface GoogleSheetsUser {
 const GIS_SCRIPT_SRC = 'https://accounts.google.com/gsi/client';
 const SHEETS_SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file';
 
+// Header row for the "Managers" payroll-rate tab. This tab is intentionally
+// separate from the "Users" tab and from the generic bidirectional data
+// engine in this file (readAllDataFromSpreadsheet / writeAllDataToSpreadsheet
+// / syncStateToSpreadsheetIncremental all skip it on purpose): it exists
+// purely so HKA_MANAGEMENT can set commissionRate/baseSalary for Salon
+// Manager accounts from a spreadsheet, the same way the "Therapists" tab's
+// commissionRate/baseSalary columns work - read one-way, audited, via
+// POST /api/syncSheetsToFirestore (server/controllers/googleSheetsController.ts),
+// never written back to here and never touching any other User field
+// (role/branch/email/password stay fully out of Sheets, see
+// sheetsPersistController.ts).
+export const MANAGERS_SHEET_HEADERS = ['id', 'name', 'branch', 'commissionRate', 'baseSalary', 'status'];
+
 let cachedAccessToken: string | null = null;
 let cachedUser: GoogleSheetsUser | null = null;
 let authListeners: Array<(user: GoogleSheetsUser | null) => void> = [];
@@ -169,7 +182,7 @@ export const ensureSheetsExist = async (spreadsheetId: string, accessToken: stri
     const spreadsheet = await getRes.json();
     const existingTitles = (spreadsheet.sheets || []).map((s: any) => s.properties.title);
     
-    const requiredTitles = ['Customers', 'Bookings', 'Transactions', 'Therapists', 'Products', 'Services', 'Expenses', 'Attendance', 'Users'];
+    const requiredTitles = ['Customers', 'Bookings', 'Transactions', 'Therapists', 'Products', 'Services', 'Expenses', 'Attendance', 'Users', 'Managers'];
     const missingTitles = requiredTitles.filter(t => !existingTitles.includes(t));
     
     if (missingTitles.length > 0) {
@@ -187,6 +200,21 @@ export const ensureSheetsExist = async (spreadsheetId: string, accessToken: stri
         },
         body: JSON.stringify({ requests })
       });
+
+      // "Managers" is deliberately NOT part of the generic read/write data
+      // engine below (see MANAGERS_SHEET_HEADERS for why), so unlike every
+      // other tab its header row is never written by the normal sync loop.
+      // Write it once here, right after the blank tab is created.
+      if (missingTitles.includes('Managers')) {
+        await fetchWithRetry(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Managers!A1:F1?valueInputOption=RAW`, {
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ values: [MANAGERS_SHEET_HEADERS] })
+        });
+      }
     }
   } catch (error) {
     console.error('Failed to ensure all sheets exist:', error);
@@ -242,6 +270,7 @@ export const findOrCreateDatabase = async (
         { properties: { title: 'Expenses' } },
         { properties: { title: 'Attendance' } },
         { properties: { title: 'Users' } },
+        { properties: { title: 'Managers' } },
       ],
     }),
   });

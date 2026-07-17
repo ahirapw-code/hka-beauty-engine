@@ -6,9 +6,74 @@ import Setting from "../models/Setting.js";
 import PayrollAuditLog from "../models/PayrollAuditLog.js";
 
 /**
+ * Parses commissionRate/baseSalary changes out of one sheet row and returns
+ * what changed, without writing anything - shared by the Therapists and
+ * Managers tabs below so both get identical validation/audit behavior.
+ */
+function diffRateAndSalary(
+  row: any[],
+  commissionRateIndex: number,
+  baseSalaryIndex: number,
+  currentCommissionRate: number | undefined,
+  currentBaseSalary: number | undefined,
+  staffLabel: string,
+  warnings: string[]
+): { commissionRate?: number; baseSalary?: number } {
+  const changes: { commissionRate?: number; baseSalary?: number } = {};
+
+  if (commissionRateIndex !== -1 && commissionRateIndex < row.length) {
+    const rawComm = row[commissionRateIndex];
+    if (rawComm !== undefined && rawComm !== null && String(rawComm).trim() !== "") {
+      const parsedComm = Number(rawComm);
+      const currentComm = currentCommissionRate !== undefined ? Number(currentCommissionRate) : null;
+      if (parsedComm !== currentComm) {
+        if (isNaN(parsedComm) || parsedComm < 0 || parsedComm > 1) {
+          warnings.push(
+            `Baris ${staffLabel} di Sheet memiliki nilai commissionRate tidak valid (${rawComm}) dan diabaikan`
+          );
+        } else {
+          changes.commissionRate = parsedComm;
+        }
+      }
+    }
+  }
+
+  if (baseSalaryIndex !== -1 && baseSalaryIndex < row.length) {
+    const rawSalary = row[baseSalaryIndex];
+    if (rawSalary !== undefined && rawSalary !== null && String(rawSalary).trim() !== "") {
+      const parsedSalary = Number(rawSalary);
+      const currentSalary = currentBaseSalary !== undefined ? Number(currentBaseSalary) : null;
+      if (parsedSalary !== currentSalary) {
+        if (isNaN(parsedSalary) || parsedSalary < 0) {
+          warnings.push(
+            `Baris ${staffLabel} di Sheet memiliki nilai baseSalary tidak valid (${rawSalary}) dan diabaikan`
+          );
+        } else {
+          changes.baseSalary = parsedSalary;
+        }
+      }
+    }
+  }
+
+  return changes;
+}
+
+/**
  * POST /api/syncSheetsToFirestore
  * Endpoint path kept unchanged for frontend compatibility even though the
  * datastore is now MongoDB. Direct Mongoose port of the original logic.
+ *
+ * Reads two tabs:
+ *  - "Therapists" -> updates Therapist.commissionRate / .baseSalary
+ *  - "Managers"   -> updates User.commissionRate / .baseSalary, but ONLY for
+ *    documents whose role is already SALON_MANAGER (a row that doesn't
+ *    match an existing Salon Manager account - wrong id, therapist id
+ *    reused by mistake, etc - is skipped with a warning instead of
+ *    silently touching the wrong user).
+ * Both are payroll-sensitive fields, so both go through this same
+ * HKA_MANAGEMENT-only, audited, one-way (sheet -> DB) path rather than the
+ * generic bidirectional Sheets sync - identical reasoning for each: comp
+ * data must never be silently overwritten by an unrelated Sheets edit.
  */
 export async function syncSheetsToFirestore(req: Request, res: Response) {
   try {
@@ -30,7 +95,13 @@ export async function syncSheetsToFirestore(req: Request, res: Response) {
       });
     }
 
-    let rows: any[][] = [];
+    // Fetch both tabs. Missing "Managers" is expected/normal for
+    // spreadsheets that haven't added it yet - that's a warning, not a
+    // hard failure, so Therapists sync keeps working either way.
+    let therapistRows: any[][] = [];
+    let managerRows: any[][] = [];
+    const warnings: string[] = [];
+
     if (appsScriptUrl) {
       const fetchRes = await fetch(appsScriptUrl, {
         method: "POST",
@@ -44,122 +115,173 @@ export async function syncSheetsToFirestore(req: Request, res: Response) {
       if (json.status !== "success") {
         throw new Error(json.message || "Apps Script failed to read");
       }
-      rows = json.data?.["Therapists"] || [];
+      therapistRows = json.data?.["Therapists"] || [];
+      managerRows = json.data?.["Managers"] || [];
+      if (managerRows.length === 0) {
+        warnings.push('Tab "Managers" tidak ditemukan atau kosong di Google Sheets - dilewati.');
+      }
     } else {
       if (!accessToken) {
         return res.status(400).json({ error: "Missing Google access token." });
       }
-      const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Therapists!A1:K`;
-      const fetchRes = await fetch(url, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      if (!fetchRes.ok) {
-        throw new Error(`Sheets API fetch failed with status ${fetchRes.status}`);
+      const therapistRes = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Therapists!A1:K`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      if (!therapistRes.ok) {
+        throw new Error(`Sheets API fetch failed with status ${therapistRes.status}`);
       }
-      const json: any = await fetchRes.json();
-      rows = json.values || [];
+      const therapistJson: any = await therapistRes.json();
+      therapistRows = therapistJson.values || [];
+
+      // "Managers" is a newer, optional tab - a 400 here (tab doesn't
+      // exist yet) is tolerated and just skips manager payroll sync for
+      // this run, instead of failing the whole request.
+      const managerRes = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Managers!A1:F`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      if (managerRes.ok) {
+        const managerJson: any = await managerRes.json();
+        managerRows = managerJson.values || [];
+      } else {
+        warnings.push('Tab "Managers" belum ditemukan di Google Sheets - dilewati. Tambahkan tab ini untuk sinkronisasi gaji/komisi Salon Manager.');
+      }
     }
 
-    if (rows.length === 0) {
-      return res.status(200).json({ success: true, warnings: [], lastPayrollSync: new Date().toISOString() });
-    }
-
-    const headers = rows[0];
-    const idIndex = headers.indexOf("id");
-    const commissionRateIndex = headers.indexOf("commissionRate");
-    const baseSalaryIndex = headers.indexOf("baseSalary");
-
-    if (idIndex === -1) {
-      return res.status(400).json({ error: "Kolom 'id' tidak ditemukan di tab Therapists pada Google Sheets." });
-    }
-
-    const therapistsToProcess = rows.slice(1);
-    const warnings: string[] = [];
     const syncTimestamp = new Date().toISOString();
 
-    for (const row of therapistsToProcess) {
-      const therapistId = row[idIndex];
-      if (!therapistId) continue;
+    // --- Therapists tab -------------------------------------------------
+    if (therapistRows.length > 0) {
+      const headers = therapistRows[0];
+      const idIndex = headers.indexOf("id");
+      const commissionRateIndex = headers.indexOf("commissionRate");
+      const baseSalaryIndex = headers.indexOf("baseSalary");
 
-      const fsData = await Therapist.findById(therapistId);
-      if (!fsData) continue; // Skip if therapist doesn't exist
+      if (idIndex === -1) {
+        warnings.push("Kolom 'id' tidak ditemukan di tab Therapists pada Google Sheets - tab ini dilewati.");
+      } else {
+        for (const row of therapistRows.slice(1)) {
+          const therapistId = row[idIndex];
+          if (!therapistId) continue;
 
-      const therapistName = fsData.name || therapistId;
+          const fsData = await Therapist.findById(therapistId);
+          if (!fsData) continue; // Skip if therapist doesn't exist
 
-      let commissionRateChanged = false;
-      let newCommissionRateValue: number | null = null;
-      if (commissionRateIndex !== -1 && commissionRateIndex < row.length) {
-        const rawComm = row[commissionRateIndex];
-        if (rawComm !== undefined && rawComm !== null && String(rawComm).trim() !== "") {
-          const parsedComm = Number(rawComm);
-          const currentComm = fsData.commissionRate !== undefined ? Number(fsData.commissionRate) : null;
-          if (parsedComm !== currentComm) {
-            if (isNaN(parsedComm) || parsedComm < 0 || parsedComm > 1) {
-              warnings.push(
-                `Baris therapist ${therapistName} di Sheet memiliki nilai commissionRate tidak valid (${rawComm}) dan diabaikan`
-              );
-            } else {
-              commissionRateChanged = true;
-              newCommissionRateValue = parsedComm;
-            }
+          const changes = diffRateAndSalary(
+            row,
+            commissionRateIndex,
+            baseSalaryIndex,
+            fsData.commissionRate,
+            fsData.baseSalary,
+            `therapist ${fsData.name || therapistId}`,
+            warnings
+          );
+
+          if (changes.commissionRate === undefined && changes.baseSalary === undefined) continue;
+
+          const auditLogsToWrite: any[] = [];
+          if (changes.commissionRate !== undefined) {
+            auditLogsToWrite.push({
+              therapistId,
+              staffType: "therapist",
+              field: "commissionRate",
+              oldValue: fsData.commissionRate ?? null,
+              newValue: changes.commissionRate,
+              source: "google_sheets_sync",
+              timestamp: syncTimestamp,
+            });
+          }
+          if (changes.baseSalary !== undefined) {
+            auditLogsToWrite.push({
+              therapistId,
+              staffType: "therapist",
+              field: "baseSalary",
+              oldValue: fsData.baseSalary ?? null,
+              newValue: changes.baseSalary,
+              source: "google_sheets_sync",
+              timestamp: syncTimestamp,
+            });
+          }
+
+          await Therapist.updateOne({ _id: therapistId }, { $set: changes });
+          if (auditLogsToWrite.length > 0) {
+            await PayrollAuditLog.insertMany(auditLogsToWrite);
           }
         }
       }
+    }
 
-      let baseSalaryChanged = false;
-      let newBaseSalaryValue: number | null = null;
-      if (baseSalaryIndex !== -1 && baseSalaryIndex < row.length) {
-        const rawSalary = row[baseSalaryIndex];
-        if (rawSalary !== undefined && rawSalary !== null && String(rawSalary).trim() !== "") {
-          const parsedSalary = Number(rawSalary);
-          const currentSalary = fsData.baseSalary !== undefined ? Number(fsData.baseSalary) : null;
-          if (parsedSalary !== currentSalary) {
-            if (isNaN(parsedSalary) || parsedSalary < 0) {
-              warnings.push(
-                `Baris therapist ${therapistName} di Sheet memiliki nilai baseSalary tidak valid (${rawSalary}) dan diabaikan`
-              );
-            } else {
-              baseSalaryChanged = true;
-              newBaseSalaryValue = parsedSalary;
-            }
+    // --- Managers tab -----------------------------------------------------
+    if (managerRows.length > 0) {
+      const headers = managerRows[0];
+      const idIndex = headers.indexOf("id");
+      const commissionRateIndex = headers.indexOf("commissionRate");
+      const baseSalaryIndex = headers.indexOf("baseSalary");
+
+      if (idIndex === -1) {
+        warnings.push("Kolom 'id' tidak ditemukan di tab Managers pada Google Sheets - tab ini dilewati.");
+      } else {
+        for (const row of managerRows.slice(1)) {
+          const managerId = row[idIndex];
+          if (!managerId) continue;
+
+          const userDoc = await User.findById(managerId);
+          if (!userDoc) {
+            warnings.push(`Baris Managers dengan id "${managerId}" tidak ditemukan sebagai akun - dilewati.`);
+            continue;
           }
-        }
-      }
+          // Safety: this row must belong to an actual Salon Manager
+          // account. Refusing to touch any other role means a stray/wrong
+          // id in this tab can never accidentally rewrite a Therapist's or
+          // an HKA_MANAGEMENT account's pay data.
+          if (userDoc.role !== "SALON_MANAGER") {
+            warnings.push(
+              `Baris Managers dengan id "${managerId}" bukan akun Salon Manager (role saat ini: ${userDoc.role}) - dilewati.`
+            );
+            continue;
+          }
 
-      if (commissionRateChanged || baseSalaryChanged) {
-        const updateData: any = {};
-        const auditLogsToWrite: any[] = [];
+          const changes = diffRateAndSalary(
+            row,
+            commissionRateIndex,
+            baseSalaryIndex,
+            userDoc.commissionRate,
+            userDoc.baseSalary,
+            `manager ${userDoc.name || managerId}`,
+            warnings
+          );
 
-        if (commissionRateChanged && newCommissionRateValue !== null) {
-          updateData.commissionRate = newCommissionRateValue;
-          auditLogsToWrite.push({
-            therapistId,
-            field: "commissionRate",
-            oldValue: fsData.commissionRate !== undefined ? fsData.commissionRate : null,
-            newValue: newCommissionRateValue,
-            source: "google_sheets_sync",
-            timestamp: syncTimestamp,
-          });
-        }
+          if (changes.commissionRate === undefined && changes.baseSalary === undefined) continue;
 
-        if (baseSalaryChanged && newBaseSalaryValue !== null) {
-          updateData.baseSalary = newBaseSalaryValue;
-          auditLogsToWrite.push({
-            therapistId,
-            field: "baseSalary",
-            oldValue: fsData.baseSalary !== undefined ? fsData.baseSalary : null,
-            newValue: newBaseSalaryValue,
-            source: "google_sheets_sync",
-            timestamp: syncTimestamp,
-          });
-        }
+          const auditLogsToWrite: any[] = [];
+          if (changes.commissionRate !== undefined) {
+            auditLogsToWrite.push({
+              therapistId: managerId,
+              staffType: "manager",
+              field: "commissionRate",
+              oldValue: userDoc.commissionRate ?? null,
+              newValue: changes.commissionRate,
+              source: "google_sheets_sync",
+              timestamp: syncTimestamp,
+            });
+          }
+          if (changes.baseSalary !== undefined) {
+            auditLogsToWrite.push({
+              therapistId: managerId,
+              staffType: "manager",
+              field: "baseSalary",
+              oldValue: userDoc.baseSalary ?? null,
+              newValue: changes.baseSalary,
+              source: "google_sheets_sync",
+              timestamp: syncTimestamp,
+            });
+          }
 
-        // Update therapist
-        await Therapist.updateOne({ _id: therapistId }, { $set: updateData });
-
-        // Write audit logs
-        if (auditLogsToWrite.length > 0) {
-          await PayrollAuditLog.insertMany(auditLogsToWrite);
+          await User.updateOne({ _id: managerId }, { $set: changes });
+          if (auditLogsToWrite.length > 0) {
+            await PayrollAuditLog.insertMany(auditLogsToWrite);
+          }
         }
       }
     }
