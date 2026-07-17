@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { createUserWithEmailAndPassword } from '../lib/authClient';
 import { doc, setDoc } from '../lib/firestoreClient';
 import { auth, secondaryAuth, db } from '../lib/firebase';
+import { appendManagerStubRow, getCachedToken } from '../lib/googleSheets';
 import { User, Branch, Product, Therapist, Expense, Role } from '../types';
 import { formatIDR } from '../utils';
 import { 
@@ -15,7 +16,9 @@ import {
   Key, 
   Trash2, 
   UserCheck,
-  Loader2
+  Loader2,
+  Pencil,
+  X
 } from 'lucide-react';
 
 interface ERPProps {
@@ -29,6 +32,7 @@ interface ERPProps {
   usersList: User[];
   onAddUser: (newUser: User) => void;
   onDeleteUser: (userId: string) => void;
+  onUpdateUserRole: (userId: string, role: Role, branch: Branch) => Promise<void>;
   onAddTherapist: (therapist: {
     name: string;
     branch: Exclude<Branch, 'ALL'>;
@@ -48,6 +52,7 @@ export default function ERP({
   usersList,
   onAddUser,
   onDeleteUser,
+  onUpdateUserRole,
   onAddTherapist
 }: ERPProps) {
   const [erpTab, setErpTab] = useState<'inventory' | 'staff' | 'expenses'>('inventory');
@@ -96,6 +101,40 @@ export default function ERP({
   const [tempPasswordModalText, setTempPasswordModalText] = useState<string | null>(null);
   const [tempPasswordModalUser, setTempPasswordModalUser] = useState<string | null>(null);
   const [resettingInProgress, setResettingInProgress] = useState(false);
+
+  // Inline "edit role/branch" state for existing personnel. This exists so
+  // promoting/reassigning someone doesn't require re-registering them under
+  // a brand new account (the previous workflow, and the actual cause of a
+  // person ending up with two separate accounts - e.g. an old THERAPIST
+  // account plus a new SALON_MANAGER one for the same person).
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [editRole, setEditRole] = useState<Role>('THERAPIST');
+  const [editBranch, setEditBranch] = useState<Branch>('NAO_STUDIO');
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  const startEditingUser = (usr: User) => {
+    setEditingUserId(usr.id);
+    setEditRole(usr.role);
+    setEditBranch(usr.branch);
+  };
+
+  const cancelEditingUser = () => {
+    setEditingUserId(null);
+  };
+
+  const saveEditingUser = async () => {
+    if (!editingUserId) return;
+    setSavingEdit(true);
+    try {
+      await onUpdateUserRole(editingUserId, editRole, editBranch);
+      setEditingUserId(null);
+    } catch (err: any) {
+      console.error('Failed to update user role/branch: ', err);
+      alert(err.message || 'Gagal memperbarui role/branch operator.');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
 
   const handleResetPassword = async (userId: string, userName: string) => {
     const confirmReset = window.confirm(`Apakah Anda yakin ingin menyetel ulang password untuk ${userName}?`);
@@ -217,12 +256,42 @@ export default function ERP({
         }
       }
 
+      // A Salon Manager account doesn't get a row in the payroll "Managers"
+      // Sheet tab on its own either (that tab is intentionally excluded
+      // from the generic Sheets sync engine - see MANAGERS_SHEET_HEADERS in
+      // src/lib/googleSheets.ts). Without this, HKA_MANAGEMENT has no
+      // practical way to find this manager's auto-generated id to set
+      // their commissionRate/baseSalary from the spreadsheet. Best-effort:
+      // if Sheets isn't connected yet, or this fails, registration itself
+      // still succeeded - just surface a non-blocking notice.
+      if (newUserRole === 'SALON_MANAGER') {
+        const spreadsheetId = localStorage.getItem('hka_sheets_spreadsheet_id');
+        const appsScriptUrl = localStorage.getItem('hka_sheets_apps_script_url');
+        if (spreadsheetId) {
+          try {
+            await appendManagerStubRow(spreadsheetId, getCachedToken(), appsScriptUrl, {
+              id: firebaseUser.uid,
+              name: newUserName.trim(),
+              branch: newUserBranch,
+            });
+          } catch (managerSheetErr) {
+            console.error('Failed to add manager row to Google Sheets: ', managerSheetErr);
+            setRegisterError(
+              `Akun login untuk ${newUserName.trim()} berhasil dibuat, tapi baris di tab Managers Google Sheet gagal ditambahkan otomatis. ` +
+              `Tambahkan manual (id: ${firebaseUser.uid}) di tab Managers untuk mengatur komisi/gaji.`
+            );
+          }
+        }
+      }
+
       // Reset Form
       setNewUserName('');
       setNewUserUsername('');
       setNewUserEmail('');
       setNewUserPassword('');
       setNewUserAvatar('');
+      setNewUserRole('THERAPIST');
+      setNewUserBranch('NAO_STUDIO');
       setShowAddUserForm(false);
     } catch (err: any) {
       console.error("Staff registration failed: ", err);
@@ -595,18 +664,42 @@ export default function ERP({
                         </span>
                       </td>
                       <td className="py-3 px-4">
-                        <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase font-mono ${
-                          usr.role === 'HKA_MANAGEMENT' 
-                            ? 'bg-purple-100 text-purple-800 border border-purple-200' 
-                            : usr.role === 'SALON_MANAGER' 
-                            ? 'bg-blue-100 text-blue-800 border border-blue-200' 
-                            : 'bg-slate-100 text-slate-800 border border-slate-200'
-                        }`}>
-                          {usr.role.replace('_', ' ')}
-                        </span>
+                        {editingUserId === usr.id ? (
+                          <select
+                            value={editRole}
+                            onChange={(e: any) => setEditRole(e.target.value)}
+                            className="bg-white border border-slate-200 rounded-lg text-[10px] px-2 py-1 text-slate-700 focus:outline-none"
+                          >
+                            <option value="HKA_MANAGEMENT">HKA Management</option>
+                            <option value="SALON_MANAGER">Salon Manager</option>
+                            <option value="THERAPIST">Salon Therapist</option>
+                          </select>
+                        ) : (
+                          <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase font-mono ${
+                            usr.role === 'HKA_MANAGEMENT' 
+                              ? 'bg-purple-100 text-purple-800 border border-purple-200' 
+                              : usr.role === 'SALON_MANAGER' 
+                              ? 'bg-blue-100 text-blue-800 border border-blue-200' 
+                              : 'bg-slate-100 text-slate-800 border border-slate-200'
+                          }`}>
+                            {usr.role.replace('_', ' ')}
+                          </span>
+                        )}
                       </td>
                       <td className="py-3 px-4 font-semibold text-slate-600">
-                        {usr.branch === 'ALL' ? 'HQ Corporate' : usr.branch === 'NAO_STUDIO' ? 'NAO Studio' : 'DIAEL Beauty'}
+                        {editingUserId === usr.id ? (
+                          <select
+                            value={editBranch}
+                            onChange={(e: any) => setEditBranch(e.target.value)}
+                            className="bg-white border border-slate-200 rounded-lg text-[10px] px-2 py-1 text-slate-700 focus:outline-none"
+                          >
+                            <option value="NAO_STUDIO">NAO Studio</option>
+                            <option value="DIAEL_BEAUTY">DIAEL Beauty</option>
+                            <option value="ALL">All Branches</option>
+                          </select>
+                        ) : (
+                          usr.branch === 'ALL' ? 'HQ Corporate' : usr.branch === 'NAO_STUDIO' ? 'NAO Studio' : 'DIAEL Beauty'
+                        )}
                       </td>
                       <td className="py-3 px-4 text-slate-500 font-mono text-[11px]">
                         {usr.email}
@@ -615,8 +708,34 @@ export default function ERP({
                         <td className="py-3 px-4 text-right">
                           {usr.id === user.id ? (
                             <span className="text-[10px] text-slate-400 font-mono">Active self</span>
+                          ) : editingUserId === usr.id ? (
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                onClick={saveEditingUser}
+                                disabled={savingEdit}
+                                className="text-emerald-600 hover:text-emerald-700 p-1 rounded-lg hover:bg-emerald-50 transition-colors cursor-pointer flex items-center justify-center"
+                                title="Simpan role/branch"
+                              >
+                                {savingEdit ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                              </button>
+                              <button
+                                onClick={cancelEditingUser}
+                                disabled={savingEdit}
+                                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
+                                title="Batal"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
                           ) : (
                             <div className="flex items-center justify-end gap-2">
+                              <button
+                                onClick={() => startEditingUser(usr)}
+                                className="text-slate-400 hover:text-blue-600 p-1 rounded-lg hover:bg-blue-50 transition-colors cursor-pointer flex items-center justify-center"
+                                title="Ubah role/branch (jangan daftar ulang untuk promosi/pindah cabang - itu yang menyebabkan akun ganda)"
+                              >
+                                <Pencil className="w-4 h-4" />
+                              </button>
                               <button
                                 onClick={() => handleResetPassword(usr.id, usr.name)}
                                 disabled={resettingInProgress}
