@@ -35,6 +35,252 @@ interface DashboardProps {
   onUpdateBookingStatus: (id: string, status: 'pending' | 'checked_in' | 'completed' | 'cancelled') => void;
 }
 
+// Shared "my therapist stats" view - used both as the full dashboard for a
+// THERAPIST-role login, and as an optional toggled-in panel for a
+// SALON_MANAGER who also has a linked Therapist profile (dual-role staff
+// who sometimes perform services themselves). Identical content either
+// way; only who gets to see it differs.
+function TherapistStatsPanel({
+  user,
+  therapistProfile,
+  bookings,
+  onUpdateBookingStatus
+}: {
+  user: User;
+  therapistProfile: Therapist;
+  bookings: Booking[];
+  onUpdateBookingStatus: DashboardProps['onUpdateBookingStatus'];
+}) {
+  const personalBookings = bookings.filter(b => b.therapistId === therapistProfile.id);
+  const completedBookingsCount = personalBookings.filter(b => b.status === 'completed').length;
+  const pendingBookingsCount = personalBookings.filter(b => b.status === 'pending').length;
+
+  return (
+    <div id="therapist-dashboard" className="space-y-6">
+      {/* Header Hero card */}
+      <div className="bg-gradient-to-r from-[#1a1c1e] to-slate-800 rounded-3xl p-6 text-white shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-6 border border-slate-700/30">
+        <div className="flex items-center gap-4">
+          <img 
+            src={user.avatar} 
+            alt={user.name} 
+            className="w-16 h-16 rounded-2xl object-cover ring-2 ring-[#D4AF37]"
+            referrerPolicy="no-referrer"
+          />
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-serif font-bold text-[#D4AF37]">{user.name}</h1>
+              <span className="text-[10px] bg-[#D4AF37]/20 text-[#D4AF37] border border-[#D4AF37]/30 px-2 py-0.5 rounded-full font-mono uppercase">
+                Active
+              </span>
+            </div>
+            <p className="text-xs text-slate-300 mt-1">
+              Therapist Portfolio • {user.branch === 'NAO_STUDIO' ? 'NAO Studio (Hair & Nails)' : 'DIAEL Beauty (Lashes & Skincare)'}
+            </p>
+          </div>
+        </div>
+        <div className="flex gap-4">
+          <div className="bg-white/10 px-4 py-3 rounded-2xl border border-white/5 backdrop-blur">
+            <span className="text-[9px] font-mono text-slate-300 uppercase block">My Rating</span>
+            <div className="flex items-center gap-1 mt-1">
+              <span className="text-base font-bold text-[#D4AF37]">{therapistProfile.rating}</span>
+              <span className="text-xs text-slate-400">/ 5.0</span>
+            </div>
+          </div>
+          <div className="bg-white/10 px-4 py-3 rounded-2xl border border-white/5 backdrop-blur">
+            <span className="text-[9px] font-mono text-slate-300 uppercase block">Earned Commission</span>
+            <span className="text-base font-bold text-emerald-400 mt-1 block">{formatIDR(therapistProfile.totalCommissionEarned)}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Quick Analytics Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between">
+          <div>
+            <span className="text-xs font-semibold text-slate-400 block font-mono">My Bookings</span>
+            <span className="text-2xl font-bold text-slate-900 mt-1 block">{personalBookings.length}</span>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center">
+            <Calendar className="w-5 h-5 text-[#D4AF37]" />
+          </div>
+        </div>
+
+        <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between">
+          <div>
+            <span className="text-xs font-semibold text-slate-400 block font-mono">Completed Jobs</span>
+            <span className="text-2xl font-bold text-emerald-600 mt-1 block">{completedBookingsCount}</span>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center">
+            <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+          </div>
+        </div>
+
+        <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between">
+          <div>
+            <span className="text-xs font-semibold text-slate-400 block font-mono">Pending Jobs</span>
+            <span className="text-2xl font-bold text-amber-600 mt-1 block">{pendingBookingsCount}</span>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center">
+            <Clock className="w-5 h-5 text-amber-500" />
+          </div>
+        </div>
+
+        <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between">
+          <div>
+            <span className="text-xs font-semibold text-slate-400 block font-mono">Commission Rate</span>
+            <span className="text-2xl font-bold text-slate-800 mt-1 block">{(therapistProfile.commissionRate * 100).toFixed(0)}%</span>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center">
+            <CircleDollarSign className="w-5 h-5 text-purple-500" />
+          </div>
+        </div>
+      </div>
+
+      {/* Schedule & Active Tasks */}
+      <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-bold text-slate-900 font-serif">Today's Active Agenda</h2>
+            <p className="text-xs text-slate-500">Track and check-in salon clients booked with you.</p>
+          </div>
+          <span className="text-[10px] font-mono bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full font-bold">
+            Sunday, July 12, 2026
+          </span>
+        </div>
+
+        {personalBookings.length === 0 ? (
+          <div className="text-center py-12 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+            <p className="text-sm text-slate-500">No appointments scheduled for you today.</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {personalBookings.map((b) => (
+              <div 
+                key={b.id} 
+                className={`p-4 rounded-2xl border transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 ${
+                  b.status === 'completed' 
+                    ? 'bg-emerald-50/20 border-emerald-100/80' 
+                    : b.status === 'cancelled' 
+                    ? 'bg-slate-50 border-slate-200 opacity-60' 
+                    : b.status === 'checked_in'
+                    ? 'bg-amber-50/20 border-amber-200/80 ring-1 ring-amber-400/20'
+                    : 'bg-white border-slate-100 hover:shadow-md'
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <div className="w-12 h-12 rounded-xl bg-slate-50 flex flex-col items-center justify-center border border-slate-100 shrink-0">
+                    <span className="text-xs font-bold text-[#D4AF37] font-mono leading-none">{b.time}</span>
+                    <span className="text-[9px] text-slate-400 font-mono mt-0.5">{b.duration}m</span>
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-sm font-bold text-slate-900">{b.customerName}</h4>
+                      <span className={`text-[8px] font-mono uppercase font-bold px-2 py-0.5 rounded-full ${
+                        b.status === 'completed' ? 'bg-emerald-100 text-emerald-800' :
+                        b.status === 'checked_in' ? 'bg-amber-100 text-amber-800' :
+                        b.status === 'cancelled' ? 'bg-rose-100 text-rose-800' : 'bg-blue-100 text-blue-800'
+                      }`}>
+                        {b.status.replace('_', ' ')}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-600 font-medium mt-1">{b.serviceName}</p>
+                    {b.notes && <p className="text-[10px] text-slate-400 italic mt-0.5">Note: "{b.notes}"</p>}
+                  </div>
+                </div>
+
+                {/* Actions for therapists to update status */}
+                <div className="flex items-center gap-2 justify-end self-end md:self-center">
+                  {b.status === 'pending' && (
+                    <button
+                      onClick={() => onUpdateBookingStatus(b.id, 'checked_in')}
+                      className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-semibold rounded-lg shadow-sm cursor-pointer transition-all"
+                    >
+                      Check In Client
+                    </button>
+                  )}
+                  {b.status === 'checked_in' && (
+                    <button
+                      onClick={() => onUpdateBookingStatus(b.id, 'completed')}
+                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-semibold rounded-lg shadow-sm cursor-pointer transition-all"
+                    >
+                      Complete Session
+                    </button>
+                  )}
+                  {b.status !== 'completed' && b.status !== 'cancelled' && (
+                    <button
+                      onClick={() => onUpdateBookingStatus(b.id, 'cancelled')}
+                      className="px-2 py-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 text-[11px] font-medium rounded-lg cursor-pointer transition-all"
+                    >
+                      Cancel
+                    </button>
+                  )}
+                  {b.status === 'completed' && (
+                    <span className="text-xs text-emerald-600 font-medium flex items-center gap-1">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                      Added to payout
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Therapist Specialties Profile Card */}
+      <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+        <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider font-mono mb-3">My Specialties Profile</h3>
+        <div className="flex flex-wrap gap-2">
+          {therapistProfile.specialties.map((spec, idx) => (
+            <span key={idx} className="bg-amber-50 text-[#D4AF37] border border-amber-100 text-xs px-3 py-1 rounded-full font-medium shadow-xs">
+              {spec}
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Small pill switcher shown to a dual-role Salon Manager (one who also has
+// a linked Therapist profile) so they can flip between their branch
+// management dashboard and their personal "as a therapist" stats, without
+// switching accounts or logging out - they stay logged in as Manager the
+// whole time, this only changes which view of the data they're looking at.
+function DualRoleViewToggle({
+  dashboardView,
+  setDashboardView
+}: {
+  dashboardView: 'manager' | 'therapist';
+  setDashboardView: (v: 'manager' | 'therapist') => void;
+}) {
+  return (
+    <div className="flex items-center gap-2 bg-white p-1.5 rounded-2xl border border-slate-100 shadow-sm w-fit">
+      <span className="text-[10px] text-slate-400 font-mono uppercase px-2">Tampilan:</span>
+      <button
+        onClick={() => setDashboardView('manager')}
+        className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+          dashboardView === 'manager'
+            ? 'bg-[#1a1c1e] text-[#D4AF37]'
+            : 'text-slate-500 hover:bg-slate-50'
+        }`}
+      >
+        Manager
+      </button>
+      <button
+        onClick={() => setDashboardView('therapist')}
+        className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+          dashboardView === 'therapist'
+            ? 'bg-[#1a1c1e] text-[#D4AF37]'
+            : 'text-slate-500 hover:bg-slate-50'
+        }`}
+      >
+        Therapist Saya
+      </button>
+    </div>
+  );
+}
+
 export default function Dashboard({
   user,
   selectedBranch,
@@ -45,6 +291,14 @@ export default function Dashboard({
   onUpdateBookingStatus
 }: DashboardProps) {
   const isTherapist = user.role === 'THERAPIST';
+
+  // Dual-role staff: a SALON_MANAGER who sometimes also performs services
+  // themselves gets a linked Therapist record (Therapist.linkedUserId ===
+  // this manager's user id, set via the "Therapists" Google Sheet tab).
+  // When that link exists, they can toggle between their normal manager
+  // dashboard and their personal therapist stats without logging out.
+  const linkedTherapistProfile = therapists.find(t => t.linkedUserId === user.id) || null;
+  const [dashboardView, setDashboardView] = useState<'manager' | 'therapist'>('manager');
 
   const [targets, setTargets] = useState<{ [key in 'NAO_STUDIO' | 'DIAEL_BEAUTY']: number }>(() => {
     const saved = localStorage.getItem('hka_branch_targets');
@@ -87,193 +341,29 @@ export default function Dashboard({
   // ----------------------------------------------------
   if (isTherapist) {
     const therapistProfile = therapists.find(t => t.name.toLowerCase() === user.name.toLowerCase()) || therapists[0];
-    const personalBookings = bookings.filter(b => b.therapistId === therapistProfile.id);
-    const completedBookingsCount = personalBookings.filter(b => b.status === 'completed').length;
-    const pendingBookingsCount = personalBookings.filter(b => b.status === 'pending').length;
-
     return (
-      <div id="therapist-dashboard" className="space-y-6">
-        {/* Header Hero card */}
-        <div className="bg-gradient-to-r from-[#1a1c1e] to-slate-800 rounded-3xl p-6 text-white shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-6 border border-slate-700/30">
-          <div className="flex items-center gap-4">
-            <img 
-              src={user.avatar} 
-              alt={user.name} 
-              className="w-16 h-16 rounded-2xl object-cover ring-2 ring-[#D4AF37]"
-              referrerPolicy="no-referrer"
-            />
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-xl font-serif font-bold text-[#D4AF37]">{user.name}</h1>
-                <span className="text-[10px] bg-[#D4AF37]/20 text-[#D4AF37] border border-[#D4AF37]/30 px-2 py-0.5 rounded-full font-mono uppercase">
-                  Active
-                </span>
-              </div>
-              <p className="text-xs text-slate-300 mt-1">
-                Therapist Portfolio • {user.branch === 'NAO_STUDIO' ? 'NAO Studio (Hair & Nails)' : 'DIAEL Beauty (Lashes & Skincare)'}
-              </p>
-            </div>
-          </div>
-          <div className="flex gap-4">
-            <div className="bg-white/10 px-4 py-3 rounded-2xl border border-white/5 backdrop-blur">
-              <span className="text-[9px] font-mono text-slate-300 uppercase block">My Rating</span>
-              <div className="flex items-center gap-1 mt-1">
-                <span className="text-base font-bold text-[#D4AF37]">{therapistProfile.rating}</span>
-                <span className="text-xs text-slate-400">/ 5.0</span>
-              </div>
-            </div>
-            <div className="bg-white/10 px-4 py-3 rounded-2xl border border-white/5 backdrop-blur">
-              <span className="text-[9px] font-mono text-slate-300 uppercase block">Earned Commission</span>
-              <span className="text-base font-bold text-emerald-400 mt-1 block">{formatIDR(therapistProfile.totalCommissionEarned)}</span>
-            </div>
-          </div>
-        </div>
+      <TherapistStatsPanel
+        user={user}
+        therapistProfile={therapistProfile}
+        bookings={bookings}
+        onUpdateBookingStatus={onUpdateBookingStatus}
+      />
+    );
+  }
 
-        {/* Quick Analytics Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between">
-            <div>
-              <span className="text-xs font-semibold text-slate-400 block font-mono">My Bookings</span>
-              <span className="text-2xl font-bold text-slate-900 mt-1 block">{personalBookings.length}</span>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center">
-              <Calendar className="w-5 h-5 text-[#D4AF37]" />
-            </div>
-          </div>
 
-          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between">
-            <div>
-              <span className="text-xs font-semibold text-slate-400 block font-mono">Completed Jobs</span>
-              <span className="text-2xl font-bold text-emerald-600 mt-1 block">{completedBookingsCount}</span>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center">
-              <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-            </div>
-          </div>
-
-          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between">
-            <div>
-              <span className="text-xs font-semibold text-slate-400 block font-mono">Pending Jobs</span>
-              <span className="text-2xl font-bold text-amber-600 mt-1 block">{pendingBookingsCount}</span>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center">
-              <Clock className="w-5 h-5 text-amber-500" />
-            </div>
-          </div>
-
-          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between">
-            <div>
-              <span className="text-xs font-semibold text-slate-400 block font-mono">Commission Rate</span>
-              <span className="text-2xl font-bold text-slate-800 mt-1 block">{(therapistProfile.commissionRate * 100).toFixed(0)}%</span>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center">
-              <CircleDollarSign className="w-5 h-5 text-purple-500" />
-            </div>
-          </div>
-        </div>
-
-        {/* Schedule & Active Tasks */}
-        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="text-lg font-bold text-slate-900 font-serif">Today's Active Agenda</h2>
-              <p className="text-xs text-slate-500">Track and check-in salon clients booked with you.</p>
-            </div>
-            <span className="text-[10px] font-mono bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full font-bold">
-              Sunday, July 12, 2026
-            </span>
-          </div>
-
-          {personalBookings.length === 0 ? (
-            <div className="text-center py-12 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
-              <p className="text-sm text-slate-500">No appointments scheduled for you today.</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {personalBookings.map((b) => (
-                <div 
-                  key={b.id} 
-                  className={`p-4 rounded-2xl border transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 ${
-                    b.status === 'completed' 
-                      ? 'bg-emerald-50/20 border-emerald-100/80' 
-                      : b.status === 'cancelled' 
-                      ? 'bg-slate-50 border-slate-200 opacity-60' 
-                      : b.status === 'checked_in'
-                      ? 'bg-amber-50/20 border-amber-200/80 ring-1 ring-amber-400/20'
-                      : 'bg-white border-slate-100 hover:shadow-md'
-                  }`}
-                >
-                  <div className="flex items-start gap-3">
-                    <div className="w-12 h-12 rounded-xl bg-slate-50 flex flex-col items-center justify-center border border-slate-100 shrink-0">
-                      <span className="text-xs font-bold text-[#D4AF37] font-mono leading-none">{b.time}</span>
-                      <span className="text-[9px] text-slate-400 font-mono mt-0.5">{b.duration}m</span>
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h4 className="text-sm font-bold text-slate-900">{b.customerName}</h4>
-                        <span className={`text-[8px] font-mono uppercase font-bold px-2 py-0.5 rounded-full ${
-                          b.status === 'completed' ? 'bg-emerald-100 text-emerald-800' :
-                          b.status === 'checked_in' ? 'bg-amber-100 text-amber-800' :
-                          b.status === 'cancelled' ? 'bg-rose-100 text-rose-800' : 'bg-blue-100 text-blue-800'
-                        }`}>
-                          {b.status.replace('_', ' ')}
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-600 font-medium mt-1">{b.serviceName}</p>
-                      {b.notes && <p className="text-[10px] text-slate-400 italic mt-0.5">Note: "{b.notes}"</p>}
-                    </div>
-                  </div>
-
-                  {/* Actions for therapists to update status */}
-                  <div className="flex items-center gap-2 justify-end self-end md:self-center">
-                    {b.status === 'pending' && (
-                      <button
-                        onClick={() => onUpdateBookingStatus(b.id, 'checked_in')}
-                        className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-semibold rounded-lg shadow-sm cursor-pointer transition-all"
-                      >
-                        Check In Client
-                      </button>
-                    )}
-                    {b.status === 'checked_in' && (
-                      <button
-                        onClick={() => onUpdateBookingStatus(b.id, 'completed')}
-                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-semibold rounded-lg shadow-sm cursor-pointer transition-all"
-                      >
-                        Complete Session
-                      </button>
-                    )}
-                    {b.status !== 'completed' && b.status !== 'cancelled' && (
-                      <button
-                        onClick={() => onUpdateBookingStatus(b.id, 'cancelled')}
-                        className="px-2 py-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 text-[11px] font-medium rounded-lg cursor-pointer transition-all"
-                      >
-                        Cancel
-                      </button>
-                    )}
-                    {b.status === 'completed' && (
-                      <span className="text-xs text-emerald-600 font-medium flex items-center gap-1">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                        Added to payout
-                      </span>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Therapist Specialties Profile Card */}
-        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
-          <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider font-mono mb-3">My Specialties Profile</h3>
-          <div className="flex flex-wrap gap-2">
-            {therapistProfile.specialties.map((spec, idx) => (
-              <span key={idx} className="bg-amber-50 text-[#D4AF37] border border-amber-100 text-xs px-3 py-1 rounded-full font-medium shadow-xs">
-                {spec}
-              </span>
-            ))}
-          </div>
-        </div>
+  // Dual-role manager viewing their personal therapist stats instead of
+  // the branch management dashboard.
+  if (linkedTherapistProfile && dashboardView === 'therapist') {
+    return (
+      <div className="space-y-4">
+        <DualRoleViewToggle dashboardView={dashboardView} setDashboardView={setDashboardView} />
+        <TherapistStatsPanel
+          user={user}
+          therapistProfile={linkedTherapistProfile}
+          bookings={bookings}
+          onUpdateBookingStatus={onUpdateBookingStatus}
+        />
       </div>
     );
   }
@@ -368,6 +458,9 @@ export default function Dashboard({
 
   return (
     <div id="unified-dashboard" className="space-y-6">
+      {linkedTherapistProfile && (
+        <DualRoleViewToggle dashboardView={dashboardView} setDashboardView={setDashboardView} />
+      )}
       {/* Upper Grid of KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
         {/* Total Revenue */}

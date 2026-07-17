@@ -60,7 +60,7 @@ var SHEET_SCHEMAS = {
   'Customers':   ['id','name','email','phone','totalSpend','visitsCount','lastVisit','notes','preferredBranch'],
   'Bookings':    ['id','customerName','customerPhone','serviceId','serviceName','therapistId','therapistName','branch','date','time','duration','price','status','notes'],
   'Transactions':['id','date','customerName','branch','subtotal','discount','total','paymentMethod','cashierName','items_json'],
-  'Therapists':  ['id','name','branch','specialties','rating','commissionRate','totalCommissionEarned','status','monthlyTarget','currentSales','baseSalary'],
+  'Therapists':  ['id','name','branch','specialties','rating','commissionRate','totalCommissionEarned','status','monthlyTarget','currentSales','baseSalary','linkedUserId'],
   'Products':    ['id','name','sku','price','cost','stock','minStock','branch','category'],
   'Expenses':    ['id','branch','category','amount','date','description'],
   'Attendance':  ['id','userId','userName','role','branch','date','clockIn','clockOut','status','notes'],

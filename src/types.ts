@@ -29,6 +29,10 @@ export interface Therapist {
   monthlyTarget: number; // Target sales to meet, e.g., 5000
   currentSales: number;  // Current total sales completed by therapist
   baseSalary: number; // Base salary for therapist
+  // Dual-role staff: set to a User.id when this Therapist record is the
+  // "therapist hat" of a Salon Manager who also performs services
+  // themselves. Empty/undefined for ordinary single-role therapists.
+  linkedUserId?: string;
 }
 
 export interface Service {

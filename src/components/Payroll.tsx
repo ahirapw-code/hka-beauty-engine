@@ -46,6 +46,9 @@ export default function PayrollComponent({ user, selectedBranch: initialBranch }
   // Core entities state
   const [therapists, setTherapists] = useState<Therapist[]>([]);
   const [managers, setManagers] = useState<User[]>([]);
+  // userId -> linked Therapist, for managers who are dual-role (also
+  // perform services themselves). Populated alongside the managers list.
+  const [linkedTherapistsByUserId, setLinkedTherapistsByUserId] = useState<Record<string, Therapist>>({});
   const [existingPayrolls, setExistingPayrolls] = useState<Payroll[]>([]);
   const [calculatedPreviews, setCalculatedPreviews] = useState<Record<string, { baseSalary: number; commissionEarned: number; daysPresent: number }>>({});
   
@@ -127,6 +130,18 @@ export default function PayrollComponent({ user, selectedBranch: initialBranch }
             loadedManagers.push(d.data() as User);
           });
           setManagers(loadedManagers);
+
+          // Look up which of these managers are dual-role (have a linked
+          // Therapist profile) so the table can show a small badge.
+          const therapistRef = collection(db, 'therapists');
+          const linkTq = query(therapistRef, where('branch', '==', selectedBranch));
+          const linkTSnap = await getDocs(linkTq);
+          const linkedMap: Record<string, Therapist> = {};
+          linkTSnap.forEach(d => {
+            const t = d.data() as Therapist;
+            if (t.linkedUserId) linkedMap[t.linkedUserId] = t;
+          });
+          setLinkedTherapistsByUserId(linkedMap);
 
           // Calculate previews for managers who don't have stored payrolls
           const previews: typeof calculatedPreviews = {};
@@ -707,7 +722,17 @@ export default function PayrollComponent({ user, selectedBranch: initialBranch }
                       <tr key={manager.id} className="hover:bg-slate-50/30 transition-colors">
                         {/* Name */}
                         <td className="p-4 pl-6">
-                          <div className="font-bold text-slate-900">{manager.name}</div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold text-slate-900">{manager.name}</span>
+                            {linkedTherapistsByUserId[manager.id] && (
+                              <span
+                                className="text-[9px] bg-purple-50 text-purple-700 border border-purple-200 px-1.5 py-0.5 rounded-full font-bold font-mono uppercase"
+                                title={`Juga terdaftar sebagai therapist (id: ${linkedTherapistsByUserId[manager.id].id}) - lihat payroll komisinya di tab Terapis`}
+                              >
+                                Dual-role
+                              </span>
+                            )}
+                          </div>
                           <div className="text-[10px] text-slate-400 font-mono mt-0.5">Email: {manager.email} • ID: {manager.id}</div>
                         </td>
 

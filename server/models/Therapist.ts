@@ -14,6 +14,13 @@ export interface ITherapist extends Document<string> {
   monthlyTarget: number;
   currentSales: number;
   baseSalary: number;
+  // Set when this Therapist record represents the "therapist hat" of a
+  // dual-role Salon Manager (e.g. a manager who sometimes performs
+  // services themselves). Holds that manager's User _id. Left empty for
+  // every ordinary, single-role therapist. Not payroll-sensitive on its
+  // own, so unlike commissionRate/baseSalary it's a normal field synced
+  // through the regular bidirectional "Therapists" Google Sheet tab.
+  linkedUserId?: string;
 }
 
 const TherapistSchema = new Schema<ITherapist>(
@@ -28,6 +35,7 @@ const TherapistSchema = new Schema<ITherapist>(
     monthlyTarget: { type: Number, default: 0 },
     currentSales: { type: Number, default: 0 },
     baseSalary: { type: Number, default: 0 },
+    linkedUserId: { type: String },
   },
   baseSchemaOptions
 );

@@ -76,8 +76,10 @@ export async function calculateTherapistPayrollForPeriod(
       }
     });
 
-    // 3. Fetch attendance
-    const daysPresent = await calculateStaffAttendance(therapistId, periodMonth);
+    // 3. Fetch attendance - a dual-role manager clocks in under their own
+    // User account (linkedUserId), not this Therapist record's id, so use
+    // that when present. Ordinary therapists keep using therapistId as before.
+    const daysPresent = await calculateStaffAttendance(therapistData.linkedUserId || therapistId, periodMonth);
 
     return {
       baseSalary,
