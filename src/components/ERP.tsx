@@ -29,6 +29,12 @@ interface ERPProps {
   usersList: User[];
   onAddUser: (newUser: User) => void;
   onDeleteUser: (userId: string) => void;
+  onAddTherapist: (therapist: {
+    name: string;
+    branch: Exclude<Branch, 'ALL'>;
+    specialties?: string[];
+    linkedUserId?: string;
+  }) => Promise<void>;
 }
 
 export default function ERP({
@@ -41,7 +47,8 @@ export default function ERP({
   onAddExpense,
   usersList,
   onAddUser,
-  onDeleteUser
+  onDeleteUser,
+  onAddTherapist
 }: ERPProps) {
   const [erpTab, setErpTab] = useState<'inventory' | 'staff' | 'expenses'>('inventory');
 
@@ -145,6 +152,7 @@ export default function ERP({
 
   const handleRegisterUser = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (registering) return; // prevent double-submit from a double-tap/click racing the disabled state
     if (!newUserName || !newUserUsername || !newUserEmail || !newUserPassword) {
       setRegisterError('All required fields must be completed.');
       return;
@@ -187,6 +195,27 @@ export default function ERP({
 
       // Add to current client-side state
       onAddUser(newUser);
+
+      // A THERAPIST login account on its own doesn't make someone
+      // schedulable - Bookings/POS and the Therapists Google Sheet tab all
+      // read from the separate Therapist collection, not Users. Without
+      // this, a newly registered therapist could log in but would never
+      // show up anywhere staff actually assign work from.
+      if (newUserRole === 'THERAPIST') {
+        try {
+          await onAddTherapist({
+            name: newUserName.trim(),
+            branch: newUserBranch,
+            specialties: []
+          });
+        } catch (therapistErr) {
+          console.error('Failed to create matching Therapist record: ', therapistErr);
+          setRegisterError(
+            `Akun login untuk ${newUserName.trim()} berhasil dibuat, tapi gagal membuat data Therapist (untuk jadwal/booking). ` +
+            `Tambahkan manual lewat tab Therapists di Google Sheet, atau coba lagi.`
+          );
+        }
+      }
 
       // Reset Form
       setNewUserName('');
