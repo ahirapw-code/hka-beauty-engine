@@ -488,7 +488,7 @@ export default function PayrollComponent({ user, selectedBranch: initialBranch }
                   <tr className="border-b border-slate-100 text-[10px] text-slate-400 font-extrabold font-mono uppercase tracking-wider bg-slate-50/30">
                     <th className="p-4 pl-6">Terapis</th>
                     <th className="p-4 text-center">Kehadiran (Days)</th>
-                    <th className="p-4 text-right">Gaji Pokok</th>
+                    <th className="p-4 text-right">Gaji Pokok<span className="block normal-case font-normal text-[8px] text-slate-300">Tarif Harian &times; Hari Kerja</span></th>
                     <th className="p-4 text-right">Komisi</th>
                     <th className="p-4 text-center w-36">Bonus</th>
                     <th className="p-4 text-center w-36">Potongan</th>
@@ -522,7 +522,7 @@ export default function PayrollComponent({ user, selectedBranch: initialBranch }
                         {/* Name */}
                         <td className="p-4 pl-6">
                           <div className="font-bold text-slate-900">{therapist.name}</div>
-                          <div className="text-[10px] text-slate-400 font-mono mt-0.5">ID: {therapist.id} • Rate: {(therapist.commissionRate * 100).toFixed(0)}%</div>
+                          <div className="text-[10px] text-slate-400 font-mono mt-0.5">ID: {therapist.id} • Komisi: {(therapist.commissionRate * 100).toFixed(0)}% • Harian: {formatIDR(therapist.baseSalary || 0)}</div>
                         </td>
 
                         {/* Attendance */}
@@ -533,6 +533,9 @@ export default function PayrollComponent({ user, selectedBranch: initialBranch }
                         {/* Base Salary */}
                         <td className="p-4 text-right font-mono text-slate-600">
                           {formatIDR(baseSalary)}
+                          <div className="text-[9px] text-slate-400 font-mono normal-case mt-0.5">
+                            {formatIDR(therapist.baseSalary || 0)}/hari &times; {daysPresent} hari
+                          </div>
                         </td>
 
                         {/* Commission */}
