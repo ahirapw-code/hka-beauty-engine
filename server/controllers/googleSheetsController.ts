@@ -59,16 +59,47 @@ function diffRateAndSalary(
 }
 
 /**
+ * Same idea as diffRateAndSalary above, but for a single plain non-negative
+ * numeric field (currently just monthlyTarget) that isn't a 0-1 rate. Kept
+ * separate rather than folded into diffRateAndSalary since Therapists and
+ * Managers may grow more of these independently-optional columns over time.
+ */
+function diffNonNegativeField(
+  row: any[],
+  fieldIndex: number,
+  currentValue: number | undefined,
+  fieldName: string,
+  staffLabel: string,
+  warnings: string[]
+): number | undefined {
+  if (fieldIndex === -1 || fieldIndex >= row.length) return undefined;
+  const raw = row[fieldIndex];
+  if (raw === undefined || raw === null || String(raw).trim() === "") return undefined;
+
+  const parsed = Number(raw);
+  const current = currentValue !== undefined ? Number(currentValue) : null;
+  if (parsed === current) return undefined;
+
+  if (isNaN(parsed) || parsed < 0) {
+    warnings.push(
+      `Baris ${staffLabel} di Sheet memiliki nilai ${fieldName} tidak valid (${raw}) dan diabaikan`
+    );
+    return undefined;
+  }
+  return parsed;
+}
+
+/**
  * POST /api/syncSheetsToFirestore
  * Endpoint path kept unchanged for frontend compatibility even though the
  * datastore is now MongoDB. Direct Mongoose port of the original logic.
  *
  * Reads two tabs:
  *  - "Therapists" -> updates Therapist.commissionRate / .baseSalary
- *  - "Managers"   -> updates User.commissionRate / .baseSalary, but ONLY for
- *    documents whose role is already SALON_MANAGER (a row that doesn't
- *    match an existing Salon Manager account - wrong id, therapist id
- *    reused by mistake, etc - is skipped with a warning instead of
+ *  - "Managers"   -> updates User.commissionRate / .baseSalary / .monthlyTarget,
+ *    but ONLY for documents whose role is already SALON_MANAGER (a row that
+ *    doesn't match an existing Salon Manager account - wrong id, therapist
+ *    id reused by mistake, etc - is skipped with a warning instead of
  *    silently touching the wrong user).
  * Both are payroll-sensitive fields, so both go through this same
  * HKA_MANAGEMENT-only, audited, one-way (sheet -> DB) path rather than the
@@ -138,7 +169,7 @@ export async function syncSheetsToFirestore(req: Request, res: Response) {
       // exist yet) is tolerated and just skips manager payroll sync for
       // this run, instead of failing the whole request.
       const managerRes = await fetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Managers!A1:F`,
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Managers!A1:G`,
         { headers: { Authorization: `Bearer ${accessToken}` } }
       );
       if (managerRes.ok) {
@@ -218,6 +249,7 @@ export async function syncSheetsToFirestore(req: Request, res: Response) {
       const idIndex = headers.indexOf("id");
       const commissionRateIndex = headers.indexOf("commissionRate");
       const baseSalaryIndex = headers.indexOf("baseSalary");
+      const monthlyTargetIndex = headers.indexOf("monthlyTarget");
 
       if (idIndex === -1) {
         warnings.push("Kolom 'id' tidak ditemukan di tab Managers pada Google Sheets - tab ini dilewati.");
@@ -242,7 +274,7 @@ export async function syncSheetsToFirestore(req: Request, res: Response) {
             continue;
           }
 
-          const changes = diffRateAndSalary(
+          const changes: { commissionRate?: number; baseSalary?: number; monthlyTarget?: number } = diffRateAndSalary(
             row,
             commissionRateIndex,
             baseSalaryIndex,
@@ -252,7 +284,25 @@ export async function syncSheetsToFirestore(req: Request, res: Response) {
             warnings
           );
 
-          if (changes.commissionRate === undefined && changes.baseSalary === undefined) continue;
+          const monthlyTargetChange = diffNonNegativeField(
+            row,
+            monthlyTargetIndex,
+            userDoc.monthlyTarget,
+            "monthlyTarget",
+            `manager ${userDoc.name || managerId}`,
+            warnings
+          );
+          if (monthlyTargetChange !== undefined) {
+            changes.monthlyTarget = monthlyTargetChange;
+          }
+
+          if (
+            changes.commissionRate === undefined &&
+            changes.baseSalary === undefined &&
+            changes.monthlyTarget === undefined
+          ) {
+            continue;
+          }
 
           const auditLogsToWrite: any[] = [];
           if (changes.commissionRate !== undefined) {
@@ -273,6 +323,17 @@ export async function syncSheetsToFirestore(req: Request, res: Response) {
               field: "baseSalary",
               oldValue: userDoc.baseSalary ?? null,
               newValue: changes.baseSalary,
+              source: "google_sheets_sync",
+              timestamp: syncTimestamp,
+            });
+          }
+          if (changes.monthlyTarget !== undefined) {
+            auditLogsToWrite.push({
+              therapistId: managerId,
+              staffType: "manager",
+              field: "monthlyTarget",
+              oldValue: userDoc.monthlyTarget ?? null,
+              newValue: changes.monthlyTarget,
               source: "google_sheets_sync",
               timestamp: syncTimestamp,
             });
