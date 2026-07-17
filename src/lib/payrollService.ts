@@ -41,7 +41,12 @@ export async function calculateTherapistPayrollForPeriod(
       throw new Error(`Therapist with ID ${therapistId} not found`);
     }
     const therapistData = therapistSnap.data() as Therapist;
-    const baseSalary = therapistData.baseSalary || 0;
+    // `baseSalary` on the Therapist record is a per-day rate (set per
+    // therapist via the Therapists Google Sheet tab), not a flat monthly
+    // amount - so the actual base pay for the period must scale with how
+    // many days the therapist actually worked, computed further down once
+    // daysPresent is known.
+    const dailyRate = therapistData.baseSalary || 0;
     const commissionRate = therapistData.commissionRate || 0;
 
     // 2. Fetch transactions for the month with range query
@@ -80,6 +85,12 @@ export async function calculateTherapistPayrollForPeriod(
     // User account (linkedUserId), not this Therapist record's id, so use
     // that when present. Ordinary therapists keep using therapistId as before.
     const daysPresent = await calculateStaffAttendance(therapistData.linkedUserId || therapistId, periodMonth);
+
+    // Base pay = this therapist's own daily rate x days actually worked,
+    // so two therapists with different daily rates (or different
+    // attendance) end up with correctly different base pay instead of
+    // everyone getting the same flat amount regardless of days worked.
+    const baseSalary = Math.round(dailyRate * daysPresent);
 
     return {
       baseSalary,
