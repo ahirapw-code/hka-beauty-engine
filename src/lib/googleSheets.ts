@@ -741,6 +741,36 @@ export const syncStateToSpreadsheetIncremental = async (
     // Capture new remote records
     for (const [id, remoteInfo] of remoteMap.entries()) {
       if (!processedLocalIds.has(id)) {
+        if (headers.length > 0 && lastSyncedSheet[id]) {
+          // We have a sync baseline for this id (we've seen/synced it
+          // before), yet it's missing from local state entirely - that
+          // means it was deliberately removed on this side (e.g. ERP's
+          // "Revoke operator credentials" delete button), not that the
+          // Sheet just added a brand-new row. The row in the Sheet was
+          // simply never cleaned up when that delete happened.
+          //
+          // Treating this the same as a genuinely new remote row (the old
+          // behaviour) silently resurrected every app-side deletion the
+          // moment a sync ran - both in the UI (onDataLoaded overwrites
+          // local state with this reconciled list) and, for every
+          // collection except users, permanently back in MongoDB too (via
+          // persistSheetsSyncToServer's upsert). Instead, honor the local
+          // deletion: blank out the stale row in the Sheet so it stops
+          // reappearing, and drop it from the sync baseline so it isn't
+          // tracked anymore.
+          conflictLog.push(
+            `Record ${id} dihapus di app - baris di Sheet ${sheetName} dikosongkan agar tidak muncul kembali.`
+          );
+          const blankRow = new Array(headers.length).fill('');
+          updatesToPush.push({
+            sheet: sheetName,
+            range: `${sheetName}!A${remoteInfo.rowIndex}:${lastCol}${remoteInfo.rowIndex}`,
+            values: [blankRow],
+          });
+          deletedIds[sheetName] = deletedIds[sheetName] || [];
+          deletedIds[sheetName].push(id);
+          continue;
+        }
         const parsedRemote = parseRawSheetValues(sheetName, headers, [remoteInfo.rowValues])[0];
         if (parsedRemote) nextLocalRecords.push(parsedRemote);
         newLastSyncedRaw[sheetName][id] = remoteInfo.rowValues;
@@ -813,4 +843,90 @@ export const syncStateToSpreadsheetIncremental = async (
     pushedCount,
     deletedIds
   };
+};
+
+/**
+ * Appends a stub row (id, name, branch, blank commissionRate/baseSalary,
+ * status) to the "Managers" payroll-rate tab for a newly-registered (or
+ * newly-promoted) Salon Manager.
+ *
+ * Without this, the Managers tab (see MANAGERS_SHEET_HEADERS above) never
+ * gets a row for a new manager on its own - it's intentionally excluded
+ * from the generic bidirectional sync engine, and HKA_MANAGEMENT has no
+ * practical way to discover the manager's auto-generated id to type into
+ * the sheet by hand. This gives them a ready-made row with the correct id
+ * pre-filled; commissionRate/baseSalary are left blank for them to fill in,
+ * and syncSheetsToFirestore (server/controllers/googleSheetsController.ts)
+ * picks those up the same audited way it already does for existing rows.
+ *
+ * Best-effort by design: called right after a manager's account is created,
+ * from a context where a failure here must never be treated as the
+ * registration itself failing (mirrors the existing "matching Therapist
+ * record" carve-out in ERP.tsx's handleRegisterUser).
+ */
+export const appendManagerStubRow = async (
+  spreadsheetId: string,
+  accessToken: string | null,
+  appsScriptUrl: string | null,
+  manager: { id: string; name: string; branch: string }
+): Promise<void> => {
+  await ensureSheetsExist(spreadsheetId, accessToken || '');
+
+  let existingRows: any[][] = [];
+  if (appsScriptUrl) {
+    const res = await fetchWithRetry(appsScriptUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'read', spreadsheetId }),
+    });
+    if (!res.ok) throw new Error(`Apps Script fetch failed: ${res.statusText}`);
+    const json = await res.json();
+    if (json.status !== 'success') throw new Error(json.message || 'Apps Script read failed');
+    existingRows = json.data?.['Managers'] || [];
+  } else {
+    if (!accessToken) throw new Error('SESSION_EXPIRED');
+    const res = await fetchWithRetry(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Managers!A1:F`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    if (!res.ok) throw new Error(`Sheets API fetch failed: ${res.statusText}`);
+    const json = await res.json();
+    existingRows = json.values || [];
+  }
+
+  // Idempotent: if this manager already has a row (e.g. this ran once
+  // already, or was added manually), don't append a second one.
+  const dataRows = existingRows.slice(1);
+  if (dataRows.some((row) => row[0] === manager.id)) return;
+
+  const N = existingRows.length; // includes header row, if any
+  const newRow = [manager.id, manager.name, manager.branch, '', '', 'active'];
+  const updates: { sheet: string; range: string; values: any[][] }[] = [];
+
+  if (N === 0) {
+    updates.push({ sheet: 'Managers', range: 'Managers!A1:F1', values: [MANAGERS_SHEET_HEADERS] });
+    updates.push({ sheet: 'Managers', range: 'Managers!A2:F2', values: [newRow] });
+  } else {
+    updates.push({ sheet: 'Managers', range: `Managers!A${N + 1}:F${N + 1}`, values: [newRow] });
+  }
+
+  if (appsScriptUrl) {
+    const res = await fetchWithRetry(appsScriptUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'write_incremental', spreadsheetId, updates }),
+    });
+    if (!res.ok) throw new Error(`Apps Script write failed: ${res.statusText}`);
+  } else {
+    if (!accessToken) throw new Error('SESSION_EXPIRED');
+    const res = await fetchWithRetry(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ valueInputOption: 'RAW', data: updates }),
+      }
+    );
+    if (!res.ok) throw new Error(`Sheets API write failed: ${res.statusText}`);
+  }
 };
