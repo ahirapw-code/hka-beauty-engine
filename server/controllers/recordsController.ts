@@ -6,6 +6,7 @@ import Booking from "../models/Booking.js";
 import Expense from "../models/Expense.js";
 import Payroll from "../models/Payroll.js";
 import Customer from "../models/Customer.js";
+import Therapist from "../models/Therapist.js";
 
 /**
  * These endpoints exist because customers/products/services/bookings/
@@ -107,6 +108,31 @@ export async function activateMembership(req: Request, res: Response) {
   } catch (err: any) {
     console.error("Error in activateMembership:", err);
     return res.status(500).json({ error: err.message || "Failed to activate membership." });
+  }
+}
+
+/**
+ * POST /api/therapists - create the Therapist record that makes a staff
+ * member schedulable/bookable and visible in the Therapists Google Sheet
+ * tab (management only). This is a separate thing from their User login
+ * account - see server/models/Therapist.ts and the note in ERP.tsx's
+ * handleRegisterUser for why registering a login alone was never enough
+ * for a new THERAPIST-role account to actually show up anywhere.
+ */
+export async function createTherapist(req: Request, res: Response) {
+  try {
+    const role = await getCallerRole(req);
+    if (!role) return res.status(401).json({ error: "Unauthorized." });
+    if (role !== "HKA_MANAGEMENT" && role !== "SALON_MANAGER") {
+      return res.status(403).json({ error: "Forbidden: only management may add therapists." });
+    }
+
+    const id = "th-" + Date.now().toString(36) + "-" + crypto.randomBytes(3).toString("hex");
+    const doc = await Therapist.create({ ...req.body, _id: id });
+    return res.status(200).json({ success: true, id, data: doc.toJSON() });
+  } catch (err: any) {
+    console.error("Error in createTherapist:", err);
+    return res.status(500).json({ error: err.message || "Failed to add therapist." });
   }
 }
 
