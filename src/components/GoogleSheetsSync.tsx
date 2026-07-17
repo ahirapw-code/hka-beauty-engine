@@ -67,12 +67,13 @@ var SHEET_SCHEMAS = {
   'Attendance':  ['id','userId','userName','role','branch','date','clockIn','clockOut','status','notes'],
   'Users':       ['id','username','name','role','branch','email','avatar'],
   // Payroll-rate tab for Salon Managers, mirrors the commissionRate/
-  // baseSalary columns on 'Therapists' - see MANAGERS_SHEET_HEADERS in
-  // src/lib/googleSheets.ts for the full rationale. Only 'id', 'name'
-  // (reference only), 'branch', 'commissionRate', 'baseSalary' and
-  // 'status' matter; nothing else about the manager account is read from
-  // or written to this tab.
-  'Managers':    ['id','name','branch','commissionRate','baseSalary','status']
+  // baseSalary/monthlyTarget columns on 'Therapists' - see
+  // MANAGERS_SHEET_HEADERS in src/lib/googleSheets.ts for the full
+  // rationale. Only 'id', 'name' (reference only), 'branch',
+  // 'commissionRate', 'baseSalary', 'status' and 'monthlyTarget' matter;
+  // nothing else about the manager account is read from or written to
+  // this tab.
+  'Managers':    ['id','name','branch','commissionRate','baseSalary','status','monthlyTarget']
 };
 
 function ensureSheets(ss) {
@@ -96,6 +97,20 @@ function ensureSheets(ss) {
       range.setFontWeight('bold').setBackground('#f1f3f4');
       sheet.setFrozenRows(1);
       sheet.autoResizeColumns(1, headers.length);
+    } else {
+      // Existing tab (e.g. "Therapists" before linkedUserId existed, or
+      // "Managers" before monthlyTarget existed) - extend the header row in
+      // place if the schema above has grown new trailing columns, instead
+      // of only writing headers on brand new sheets. Existing data rows are
+      // left untouched.
+      var existingHeaderRange = sheet.getRange(1, 1, 1, sheet.getLastColumn());
+      var existingHeaders = existingHeaderRange.getValues()[0];
+      if (existingHeaders.length < headers.length) {
+        var newRange = sheet.getRange(1, 1, 1, headers.length);
+        newRange.setValues([headers]);
+        newRange.setFontWeight('bold').setBackground('#f1f3f4');
+        sheet.autoResizeColumns(1, headers.length);
+      }
     }
   }
   // Clean up the default blank "Sheet1" Google gives every new spreadsheet
