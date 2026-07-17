@@ -15,6 +15,9 @@ export interface User {
   // commissionRate/baseSalary. Not meaningful for other roles.
   commissionRate?: number;
   baseSalary?: number;
+  // Sales target for SALON_MANAGER accounts - same "Managers" sheet/sync
+  // mechanism as above, mirrors Therapist.monthlyTarget.
+  monthlyTarget?: number;
 }
 
 export interface Therapist {
@@ -165,4 +168,3 @@ export interface Payroll {
   generatedAt: string;
   generatedBy: string;
 }
-
