@@ -109,6 +109,38 @@ export async function activateMembership(customerId: string): Promise<Customer> 
   }
 }
 
+// 1b. ADD THERAPIST
+// Creates the Therapist record that makes a staff member schedulable/
+// bookable and visible in the Therapists Google Sheet tab - separate from
+// their User login account (see server/controllers/recordsController.ts).
+export async function addTherapist(therapist: {
+  name: string;
+  branch: 'NAO_STUDIO' | 'DIAEL_BEAUTY';
+  specialties?: string[];
+  linkedUserId?: string;
+}): Promise<Therapist> {
+  const path = `therapists/${therapist.name}`;
+  try {
+    const idToken = await auth.currentUser?.getIdToken();
+    const response = await fetch('/api/therapists', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {})
+      },
+      body: JSON.stringify(therapist)
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || `Failed to add therapist (status ${response.status})`);
+    }
+    return data.data as Therapist;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+    throw error;
+  }
+}
+
 // 2. ADD BOOKING
 export async function addBooking(booking: Booking): Promise<Booking> {
   const path = `bookings/${booking.id}`;
