@@ -19,6 +19,10 @@ export interface IUser extends Document<string> {
   // never through the generic /api/data/users write path.
   commissionRate?: number;
   baseSalary?: number;
+  // Sales target, meaningful only for SALON_MANAGER accounts. Mirrors
+  // Therapist.monthlyTarget - same "Managers" tab / same one-way
+  // Sheets -> DB sync as commissionRate/baseSalary above.
+  monthlyTarget?: number;
 }
 
 const UserSchema = new Schema<IUser>(
@@ -41,6 +45,7 @@ const UserSchema = new Schema<IUser>(
     forcePasswordChange: { type: Boolean, default: false },
     commissionRate: { type: Number, default: 0 },
     baseSalary: { type: Number, default: 0 },
+    monthlyTarget: { type: Number, default: 0 },
   },
   baseSchemaOptions
 );
