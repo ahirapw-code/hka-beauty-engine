@@ -40,8 +40,8 @@ interface TreatmentOption {
 }
 
 const TREATMENT_OPTIONS: TreatmentOption[] = [
-  { id: 'hand_nails_treatment', name: 'Hand Nails Treatment', branches: ['NAO_STUDIO'] },
-  { id: 'foot_nails_treatment', name: 'Foot Nails Treatment', branches: ['NAO_STUDIO'] },
+  { id: 'hand_nails_treatment', name: 'Hand Nails Treatment', branches: ['NAO_STUDIO', 'DIAEL_BEAUTY'] },
+  { id: 'foot_nails_treatment', name: 'Foot Nails Treatment', branches: ['NAO_STUDIO', 'DIAEL_BEAUTY'] },
   { id: 'eyelash', name: 'Eyelash', branches: ['DIAEL_BEAUTY'] },
   { id: 'eyebrow', name: 'Eyebrow', branches: ['DIAEL_BEAUTY'] },
 ];
@@ -53,6 +53,7 @@ interface BookingsProps {
   customers: Customer[];
   services: Service[];
   therapists: Therapist[];
+  users: User[];
   onAddBooking: (booking: Omit<Booking, 'id'>) => Promise<void>;
   onUpdateBookingStatus: (id: string, status: 'pending' | 'checked_in' | 'completed' | 'cancelled') => void;
 }
@@ -64,6 +65,7 @@ export default function Bookings({
   customers,
   services,
   therapists,
+  users,
   onAddBooking,
   onUpdateBookingStatus
 }: BookingsProps) {
@@ -105,9 +107,45 @@ export default function Bookings({
     return TREATMENT_OPTIONS.filter(t => t.branches.includes(bookingBranch));
   }, [bookingBranch]);
 
+  // Same structural fix as POS.tsx's activeTherapists: previously this only
+  // read the `therapists` collection, so a SALON_MANAGER never showed up as
+  // an assignable therapist here (e.g. at DIAEL Beauty) unless someone
+  // manually created a duplicate Therapist record for them via linkedUserId.
+  // Every manager in the same branch is now surfaced automatically. A
+  // manager who already has a linked real Therapist record (dual-role staff
+  // who also perform services) keeps using that record - the synthetic one
+  // is skipped for them to avoid listing the same person twice. Managers are
+  // tagged with all three treatment specialties (Nail/Eyelash/Eyebrow) since
+  // they can be assigned to any booking type, not just one.
   const branchTherapists = useMemo(() => {
-    return therapists.filter(t => t.branch === bookingBranch);
-  }, [therapists, bookingBranch]);
+    const realTherapists = therapists.filter(t => t.branch === bookingBranch);
+
+    const alreadyLinkedManagerIds = new Set(
+      therapists.filter(t => t.linkedUserId).map(t => t.linkedUserId as string)
+    );
+
+    const managerTherapists: Therapist[] = users
+      .filter(u =>
+        u.role === 'SALON_MANAGER' &&
+        (u.branch === bookingBranch || u.branch === 'ALL') &&
+        !alreadyLinkedManagerIds.has(u.id)
+      )
+      .map(u => ({
+        id: u.id,
+        name: `${u.name} (Manager)`,
+        branch: bookingBranch,
+        specialties: ['Nail', 'Eyelash', 'Eyebrow'],
+        rating: 0,
+        commissionRate: u.commissionRate || 0,
+        totalCommissionEarned: 0,
+        status: 'active',
+        monthlyTarget: u.monthlyTarget || 0,
+        currentSales: 0,
+        baseSalary: u.baseSalary || 0,
+      }));
+
+    return [...realTherapists, ...managerTherapists];
+  }, [therapists, users, bookingBranch]);
 
   // Customers are branch-specific (separate NAO Studio / DIAEL Beauty client
   // bases) - only show the ones whose preferredBranch matches the branch
@@ -131,8 +169,8 @@ export default function Bookings({
   }, [selectedTreatmentId]);
 
   const selectedTherapist = useMemo(() => {
-    return therapists.find(t => t.id === selectedTherapistId);
-  }, [therapists, selectedTherapistId]);
+    return branchTherapists.find(t => t.id === selectedTherapistId);
+  }, [branchTherapists, selectedTherapistId]);
 
   // Compute occupied slots for selected therapist + date
   const occupiedSlots = useMemo(() => {
@@ -204,7 +242,7 @@ export default function Bookings({
     }
     const customer = customers.find(c => c.id === selectedCustomerId) || branchCustomers[0];
     const treatment = TREATMENT_OPTIONS.find(t => t.id === selectedTreatmentId);
-    const therapist = therapists.find(t => t.id === selectedTherapistId);
+    const therapist = branchTherapists.find(t => t.id === selectedTherapistId);
     const duration = Number(bookingDuration);
 
     if (!customer || !treatment || !therapist) return;
