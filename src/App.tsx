@@ -78,32 +78,6 @@ export default function App() {
   const [selectedBranch, setSelectedBranch] = useState<Branch>('ALL');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-  // Live clock shown in the header, in the studio's local timezone (WIB,
-  // UTC+7) rather than the raw UTC/server time. Ticks every minute - a
-  // clock doesn't need second-level precision for this header display.
-  const [currentTimeWIB, setCurrentTimeWIB] = useState(() =>
-    new Date().toLocaleTimeString('id-ID', {
-      timeZone: 'Asia/Jakarta',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    })
-  );
-  useEffect(() => {
-    const tick = () =>
-      setCurrentTimeWIB(
-        new Date().toLocaleTimeString('id-ID', {
-          timeZone: 'Asia/Jakarta',
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: false,
-        })
-      );
-    tick();
-    const intervalId = setInterval(tick, 60 * 1000);
-    return () => clearInterval(intervalId);
-  }, []);
-
   // Business state engines loaded from localStorage initially as temporary/offline cache.
   // IMPORTANT: fallback is an empty array, NOT an INITIAL_*/PRESET_* mock
   // constant. Using mock data as a fallback here caused the Sheets sync
@@ -429,8 +403,7 @@ export default function App() {
   const handleAddTransaction = async (
     newTx: Omit<Transaction, 'id' | 'date'>,
     invoiceDiscountValue: number = 0,
-    invoiceDiscountType: 'percent' | 'flat' = 'flat',
-    idempotencyKey?: string
+    invoiceDiscountType: 'percent' | 'flat' = 'flat'
   ): Promise<string> => {
     // id/date are placeholders only - the server assigns the authoritative
     // id and timestamp; callers should use the returned id, not this one.
@@ -440,30 +413,17 @@ export default function App() {
       ...newTx
     };
 
-    return addTransaction(
-      completeTx,
-      customers,
-      products,
-      therapists,
-      invoiceDiscountValue,
-      invoiceDiscountType,
-      idempotencyKey
-    );
+    return addTransaction(completeTx, customers, products, therapists, invoiceDiscountValue, invoiceDiscountType);
   };
 
   // 2. Client registration (CRM addition)
   const handleAddCustomer = async (newCustomer: Omit<Customer, 'id' | 'totalSpend' | 'visitsCount'>) => {
-    const newId = 'c' + (customers.length + 1);
-    const customer: Customer = {
-      id: newId,
-      totalSpend: 0,
-      visitsCount: 0,
-      ...newCustomer
-    };
     try {
-      await addCustomer(customer);
+      const created = await addCustomer(newCustomer as Customer);
+      setCustomers(prev => [...prev, created]);
     } catch (err) {
-      console.error("Error registering customer in Firestore: ", err);
+      console.error("Error registering customer: ", err);
+      alert(err instanceof Error ? err.message : 'Gagal menyimpan data customer. Silakan coba lagi.');
     }
   };
 
@@ -654,7 +614,6 @@ export default function App() {
             transactions={transactions}
             bookings={bookings}
             therapists={therapists}
-            users={usersList}
             products={products}
             onUpdateBookingStatus={handleUpdateBookingStatus}
           />
@@ -849,7 +808,7 @@ export default function App() {
               dataReady={dataReady}
             />
             <span className="text-xs text-slate-500 font-mono bg-slate-50 border border-slate-100 px-3 py-1 rounded-full hidden sm:inline-block">
-              System Time: {currentTimeWIB} WIB
+              System Time: 19:07 UTC
             </span>
           </div>
         </header>
