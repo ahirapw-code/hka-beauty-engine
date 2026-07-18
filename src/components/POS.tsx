@@ -527,7 +527,12 @@ export default function POS({
   };
 
   return (
-    <div id="pos-module" className="flex flex-col h-[calc(100dvh-120px)] xl:h-[calc(100dvh-100px)] overflow-hidden">
+    <div
+      id="pos-module"
+      className={`flex flex-col xl:h-[calc(100dvh-100px)] xl:overflow-hidden ${
+        mobileTab === 'cart' ? '' : 'h-[calc(100dvh-120px)] overflow-hidden'
+      }`}
+    >
       
       {/* Mobile-only sliding tabs - completely smooth */}
       <div className="xl:hidden flex items-center bg-slate-100 p-1 rounded-2xl mb-4 shrink-0 relative">
@@ -565,7 +570,11 @@ export default function POS({
         />
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 flex-1 overflow-hidden">
+      <div
+        className={`grid grid-cols-1 xl:grid-cols-12 gap-6 flex-1 xl:overflow-hidden ${
+          mobileTab === 'cart' ? '' : 'overflow-hidden'
+        }`}
+      >
         
         {/* Left panel: Catalog / Services & Products Grid */}
         <div className={`xl:col-span-7 flex flex-col h-full bg-white rounded-3xl border border-slate-100 p-5 overflow-hidden transition-all duration-300 ${
@@ -672,9 +681,11 @@ export default function POS({
         </div>
 
         {/* Right panel: Active Receipt Cart */}
-        <div className={`xl:col-span-5 flex flex-col h-full bg-slate-900 text-white rounded-3xl p-5 overflow-hidden shadow-2xl relative transition-all duration-300 ${
-          mobileTab === 'cart' ? 'flex animate-fade-in' : 'hidden xl:flex'
-        }`}>
+        <div
+          className={`xl:col-span-5 flex flex-col xl:h-full bg-slate-900 text-white rounded-3xl p-5 xl:overflow-hidden shadow-2xl relative transition-all duration-300 ${
+            mobileTab === 'cart' ? 'flex animate-fade-in' : 'hidden xl:flex'
+          }`}
+        >
           <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
             <div className="flex items-center gap-2">
               <ShoppingBag className="w-5 h-5 text-[#D4AF37]" />
@@ -801,9 +812,15 @@ export default function POS({
             )}
           </div>
 
-          {/* Cart items list */}
-          <div className="relative flex-1 min-h-0">
-          <div className="h-full overflow-y-auto py-4 space-y-3 pr-1">
+          {/* Cart items list.
+              Desktop (xl): fixed-height inner scroll box, unchanged from before.
+              Mobile: no nested scroll box - this flows naturally as part of
+              the page, and the page itself (the <main> ancestor in App.tsx)
+              is what scrolls. That's what lets the checkout footer below
+              stick to the bottom of the viewport instead of being pushed
+              off-screen inside a clipped box. */}
+          <div className="relative xl:flex-1 xl:min-h-0">
+          <div className="py-4 space-y-3 pr-1 xl:h-full xl:overflow-y-auto">
             {cart.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-slate-500 py-12">
                 <ShoppingBag className="w-10 h-10 text-slate-700 mb-3" />
@@ -896,11 +913,12 @@ export default function POS({
             )}
           </div>
           {cart.length > 0 && (
-            <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-slate-900 to-transparent" />
+            <div className="hidden xl:block pointer-events-none absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-slate-900 to-transparent" />
           )}
           </div>
 
-          {/* Receipt Totals / Checkout footer */}
+          {/* Discount / payment breakdown - scrolls normally with the page
+              on mobile, sits above the sticky total+checkout footer below. */}
           <div className="pt-4 border-t border-slate-800 space-y-3 shrink-0">
             {/* Invoice discount and Payment controls */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-800/30 p-2.5 rounded-xl border border-slate-800/80">
@@ -970,14 +988,21 @@ export default function POS({
                   <span className="text-rose-400 font-bold">-{formatIDR(totalDiscount)}</span>
                 </div>
               )}
-              <div className="flex justify-between text-sm font-bold pt-1.5 border-t border-slate-800 text-white">
-                <span className="text-[#D4AF37]">Total Charge:</span>
-                <span className="text-[#D4AF37]">{formatIDR(total)}</span>
-              </div>
+            </div>
+          </div>
+
+          {/* Total + Checkout: sticky to the bottom of the scrolling page on
+              mobile (standard POS pattern - the pay button never gets
+              covered by cart content), static in place on desktop (xl)
+              exactly like before. */}
+          <div className="sticky bottom-0 z-20 bg-slate-900 border-t border-slate-800 shadow-[0_-6px_16px_-4px_rgba(0,0,0,0.4)] pt-3 pb-1 space-y-3 xl:static xl:z-auto xl:shadow-none xl:pt-1.5 xl:pb-0 shrink-0">
+            <div className="flex justify-between text-sm font-bold text-white font-mono">
+              <span className="text-[#D4AF37]">Total Charge:</span>
+              <span className="text-[#D4AF37]">{formatIDR(total)}</span>
             </div>
 
             {checkoutError && (
-              <div className="mb-3 p-3 rounded-xl bg-rose-950/40 border border-rose-800/60 text-rose-200 text-xs space-y-2">
+              <div className="p-3 rounded-xl bg-rose-950/40 border border-rose-800/60 text-rose-200 text-xs space-y-2">
                 <p>{checkoutError}</p>
                 <button
                   onClick={() => handleCheckout(true)}
