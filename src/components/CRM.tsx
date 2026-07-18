@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { User, Branch, Customer } from '../types';
 import { formatIDR, getMembershipTier, visitsUntilNextTier, MEMBERSHIP_TIERS, MEMBERSHIP_DISCOUNT_PERCENT } from '../utils';
-import { Users, Search, UserPlus, Phone, Mail, Award, History, Landmark, Sparkles, Gift } from 'lucide-react';
+import { Users, Search, UserPlus, Phone, Mail, Award, History, Landmark, Sparkles, Gift, X } from 'lucide-react';
 
 interface CRMProps {
   user: User;
@@ -33,6 +33,19 @@ export default function CRM({
 
   // Handle active branch filtering
   const activeBranchFilter = user.role === 'SALON_MANAGER' ? user.branch : selectedBranch;
+
+  // Lock background scroll while the modal is open (important on mobile,
+  // otherwise the page can scroll behind the modal and the form looks "stuck")
+  useEffect(() => {
+    if (showAddCustomer) {
+      const original = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = original;
+      };
+    }
+  }, [showAddCustomer]);
+
 
   const filteredCustomers = useMemo(() => {
     return customers.filter(c => {
@@ -201,17 +214,46 @@ export default function CRM({
         </div>
       </div>
 
-      {/* Quick Profile Add Module */}
+      {/* Cross-Branch Analytics Module */}
       <div className="xl:col-span-4">
-        {showAddCustomer ? (
-          <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm space-y-4">
+        <div className="bg-[#1a1c1e] text-white rounded-3xl p-6 shadow-md text-center space-y-4">
+          <Award className="w-10 h-10 text-[#D4AF37] mx-auto" />
+          <div>
+            <h3 className="font-serif text-[#D4AF37] text-base font-bold">Cross-Branch Analytics</h3>
+            <p className="text-xs text-slate-400 mt-1">Cross-brand salon engines sharing unified profile repositories across NAO Studio and DIAEL Beauty Center.</p>
+          </div>
+          <button
+            onClick={() => setShowAddCustomer(true)}
+            className="w-full bg-[#D4AF37] text-[#1a1c1e] font-bold text-xs py-2 rounded-xl hover:bg-amber-400 cursor-pointer transition-all"
+          >
+            Add New Client
+          </button>
+        </div>
+      </div>
+
+      {/* Add Client Modal — rendered as a fixed overlay so it always appears
+          centered in the viewport, regardless of scroll position or screen
+          size. Previously this form lived inline in the xl:col-span-4 grid
+          cell, which meant on mobile (single-column layout) it rendered
+          *below* the entire customer list, off-screen, making the
+          "Add Client Profile" button look broken. */}
+      {showAddCustomer && (
+        <div
+          className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-black/50 p-4 overflow-y-auto"
+          onClick={() => setShowAddCustomer(false)}
+        >
+          <div
+            className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl space-y-4 w-full max-w-md my-8 sm:my-0"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider font-mono">Create Client Record</h3>
-              <button 
+              <button
                 onClick={() => setShowAddCustomer(false)}
-                className="text-xs text-rose-500 font-semibold cursor-pointer"
+                className="text-slate-400 hover:text-rose-500 cursor-pointer p-1 -m-1"
+                aria-label="Close"
               >
-                Cancel
+                <X className="w-4 h-4" />
               </button>
             </div>
 
@@ -294,22 +336,8 @@ export default function CRM({
               </button>
             </form>
           </div>
-        ) : (
-          <div className="bg-[#1a1c1e] text-white rounded-3xl p-6 shadow-md text-center space-y-4">
-            <Award className="w-10 h-10 text-[#D4AF37] mx-auto" />
-            <div>
-              <h3 className="font-serif text-[#D4AF37] text-base font-bold">Cross-Branch Analytics</h3>
-              <p className="text-xs text-slate-400 mt-1">Cross-brand salon engines sharing unified profile repositories across NAO Studio and DIAEL Beauty Center.</p>
-            </div>
-            <button
-              onClick={() => setShowAddCustomer(true)}
-              className="w-full bg-[#D4AF37] text-[#1a1c1e] font-bold text-xs py-2 rounded-xl hover:bg-amber-400 cursor-pointer transition-all"
-            >
-              Add New Client
-            </button>
-          </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
