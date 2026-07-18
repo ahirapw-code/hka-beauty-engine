@@ -18,10 +18,21 @@ const PROTECTED_FIELDS: Record<string, string[]> = {
 
 /**
  * Collections whose real writes must only ever happen through a dedicated,
- * business-logic-aware controller (processCheckout, clockInOut, payroll
- * finalization, etc). We block generic writes entirely, even for
- * HKA_MANAGEMENT, to prevent the accounting/audit trail from being
- * bypassed. Use a dedicated admin tool/script for manual corrections.
+ * business-logic-aware controller (processCheckout, clockInOut, etc), or
+ * that are synced from the connected Google Sheet and must not be edited
+ * directly in the app to avoid conflicting with that sync. We block
+ * generic writes entirely, even for HKA_MANAGEMENT, to prevent the
+ * accounting/audit trail from being bypassed. Use a dedicated admin
+ * tool/script for manual corrections.
+ *
+ * NOTE: "payroll" deliberately does NOT belong here. Unlike every other
+ * entry, payroll has no corresponding Google Sheets tab at all - draft /
+ * lock / finalize / pay / delete are legitimate app-native actions
+ * (Payroll.tsx) authorized by the payroll policy below, not something the
+ * Sheets sync manages. It used to be listed here by mistake, which meant
+ * a draft payroll could be neither deleted from the app (blocked with a
+ * "managed through Google Sheets" error) nor fixed via the Sheet (no tab
+ * to edit) - a permanent dead end.
  */
 const WRITE_LOCKED_COLLECTIONS = new Set([
   "transactions",
@@ -32,7 +43,6 @@ const WRITE_LOCKED_COLLECTIONS = new Set([
   "products",
   "services",
   "expenses",
-  "payroll",
   "settings",
 ]);
 
