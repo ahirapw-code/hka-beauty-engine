@@ -1,7 +1,7 @@
 import React from 'react';
 import { Transaction, BranchProfile } from '../types';
 import { formatIDR } from '../utils';
-import { Printer, Calendar, User, CreditCard } from 'lucide-react';
+import { Calendar, User, CreditCard } from 'lucide-react';
 
 interface InvoiceTemplateProps {
   transaction: Transaction;
@@ -83,64 +83,8 @@ export default function InvoiceTemplate({ transaction, branchProfile }: InvoiceT
   const membershipDiscount = transaction.membershipDiscount || 0;
   const invoiceLevelDiscount = Math.max(0, totalDiscount - totalItemDiscounts - membershipDiscount);
 
-  const handlePrint = () => {
-    const printContent = document.getElementById(`printable-invoice-${transaction.id}`);
-    if (!printContent) return;
-
-    const originalContent = document.body.innerHTML;
-    const printWindow = window.open('', '', 'height=600,width=450');
-    if (!printWindow) {
-      // Fallback: print direct
-      window.print();
-      return;
-    }
-
-    printWindow.document.write('<html><head><title>Cetak Struk</title>');
-    // Copy styles
-    const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'));
-    styles.forEach(style => {
-      printWindow.document.write(style.outerHTML);
-    });
-    // Add simple receipt printing CSS
-    printWindow.document.write(`
-      <style>
-        body {
-          font-family: 'Courier New', Courier, monospace;
-          background: white;
-          color: black;
-          padding: 10px;
-          margin: 0;
-        }
-        .no-print { display: none !important; }
-        .invoice-box { width: 380px; margin: 0 auto; box-shadow: none; border: none; padding: 0; }
-      </style>
-    `);
-    printWindow.document.write('</head><body>');
-    printWindow.document.write(printContent.outerHTML);
-    printWindow.document.write('</body></html>');
-    printWindow.document.close();
-
-    // Trigger printing once loaded
-    setTimeout(() => {
-      printWindow.focus();
-      printWindow.print();
-      printWindow.close();
-    }, 500);
-  };
-
   return (
     <div id={`invoice-container-${transaction.id}`} className="flex flex-col items-center space-y-4">
-      {/* Print Action Header (Optional UI inside the POS checkout or history) */}
-      <div className="w-full max-w-[380px] flex justify-end no-print">
-        <button
-          onClick={handlePrint}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold cursor-pointer transition-all border border-slate-200 shadow-sm"
-        >
-          <Printer className="w-3.5 h-3.5" />
-          <span>Cetak Struk</span>
-        </button>
-      </div>
-
       {/* Main Receipt Shell */}
       <div
         id={`printable-invoice-${transaction.id}`}
