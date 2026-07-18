@@ -262,7 +262,7 @@ export default function Sidebar({
       )}
 
       {/* Main Menu Navigation */}
-      <div className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+      <div className="flex-1 min-h-0 px-3 py-4 space-y-1 overflow-y-auto">
         <span className="px-3 text-[10px] text-slate-400 font-mono block mb-2 uppercase tracking-wider">Operational Hub</span>
         {allowedMenuItems.map((item) => {
           const IconComponent = item.icon;
@@ -295,7 +295,7 @@ export default function Sidebar({
       </div>
 
       {/* Footer Log Out */}
-      <div className="p-4 border-t border-slate-800 mt-auto">
+      <div className="p-4 border-t border-slate-800 mt-auto shrink-0">
         <button
           id="sidebar-logout"
           onClick={onLogout}
