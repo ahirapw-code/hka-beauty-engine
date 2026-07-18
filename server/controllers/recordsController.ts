@@ -72,6 +72,37 @@ export async function updateBookingStatus(req: Request, res: Response) {
 }
 
 /**
+ * POST /api/customers - create a new client profile (management only, same
+ * roles allowed to see the CRM Clients page - see Sidebar.tsx). This is
+ * the missing "create" carve-out for the otherwise write-locked
+ * "customers" collection: every other write-locked collection that can
+ * legitimately gain NEW records from a real app action (bookings,
+ * therapists, expenses...) already has one of these; customers never did,
+ * which is why "Add Client Profile" in CRM.tsx silently 403'd against the
+ * generic /api/data/customers route instead of ever reaching the database.
+ * totalSpend/visitsCount always start at 0 here regardless of what the
+ * client sends - those are business-logic-derived by checkout, not
+ * something a manually-created profile should be able to set upfront.
+ */
+export async function createCustomer(req: Request, res: Response) {
+  try {
+    const role = await getCallerRole(req);
+    if (!role) return res.status(401).json({ error: "Unauthorized." });
+    if (role !== "HKA_MANAGEMENT" && role !== "SALON_MANAGER") {
+      return res.status(403).json({ error: "Forbidden: only management may add client profiles." });
+    }
+
+    const { totalSpend: _ts, visitsCount: _vc, id: _drop, ...rest } = req.body || {};
+    const id = "cust-" + Date.now().toString(36) + "-" + crypto.randomBytes(3).toString("hex");
+    const doc = await Customer.create({ ...rest, _id: id, totalSpend: 0, visitsCount: 0 });
+    return res.status(200).json({ success: true, id, data: doc.toJSON() });
+  } catch (err: any) {
+    console.error("Error in createCustomer:", err);
+    return res.status(500).json({ error: err.message || "Failed to add client profile." });
+  }
+}
+
+/**
  * PATCH /api/customers/:id/membership - the membership equivalent of the
  * booking-status carve-out above: "customers" is otherwise write-locked
  * (managed through Google Sheets), but registering a walk-in/existing
