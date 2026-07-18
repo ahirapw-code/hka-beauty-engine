@@ -368,14 +368,40 @@ export default function GoogleSheetsSync({
       // Persist the reconciled dataset to MongoDB. Without this, the merge
       // above only lives in React state - a refresh (or anyone else's
       // session) would keep seeing whatever was already in the database.
+      //
+      // This is deliberately NOT swallowed into just the conflict log
+      // anymore. A failure here means the Sheet edit the person just made
+      // (e.g. flipping isMember/memberSince) only ever existed in this
+      // browser's React state for a few seconds - the very next 4s
+      // onSnapshot poll (src/lib/firestoreClient.ts) overwrites it with
+      // whatever Mongo still has, and it looks like the change "reverted
+      // itself" with zero visible error. Surfacing it as a hard error
+      // (red banner + failed sync status) instead of a buried log line
+      // makes that failure impossible to miss.
+      // Persist is only ever expected to succeed for HKA_MANAGEMENT/
+      // SALON_MANAGER (server-side check in sheetsPersistController.ts).
+      // A 403 for any other role is by design, not a bug - don't alarm a
+      // cashier/therapist's session over it. For a role that SHOULD be
+      // allowed to persist, though, a failure here is exactly the "edit
+      // vanishes after refresh" bug, so make it loud.
+      const canPersist = currentUser?.role === 'HKA_MANAGEMENT' || currentUser?.role === 'SALON_MANAGER';
+      let persistFailed = false;
       try {
         await persistSheetsSyncToServer(result.updatedLocalData, result.deletedIds);
       } catch (persistErr: any) {
         console.error('Error persisting Sheets sync to database:', persistErr);
+        const msg = persistErr?.message || String(persistErr);
         setConflictLogs(prev => [
           ...prev,
-          `Gagal menyimpan hasil sync ke database: ${persistErr.message || persistErr}`,
+          `Gagal menyimpan hasil sync ke database: ${msg}`,
         ]);
+        if (canPersist) {
+          persistFailed = true;
+          setErrorMessage(
+            `Perubahan dari Sheet berhasil dibaca, TAPI GAGAL disimpan ke database (${msg}). ` +
+            `Perubahan ini akan hilang lagi saat halaman di-refresh. Coba "Sinkronisasikan Sekarang" lagi.`
+          );
+        }
       }
 
       // Trigger backend payroll (salary and commission rate) sync from Sheets to Firestore
@@ -414,8 +440,15 @@ export default function GoogleSheetsSync({
         console.error("Error triggering backend payroll sync:", payrollErr);
       }
       
-      setSyncStatus('success');
-      setTimeout(() => setSyncStatus(googleUser || appsScriptUrl ? 'connected' : 'idle'), 4000);
+      if (persistFailed) {
+        // Keep the sync marked as an error state so the amber/rose pill and
+        // the error banner stay visible instead of flashing green
+        // "success" for a sync whose DB write actually failed.
+        setSyncStatus('error');
+      } else {
+        setSyncStatus('success');
+        setTimeout(() => setSyncStatus(googleUser || appsScriptUrl ? 'connected' : 'idle'), 4000);
+      }
       setSessionExpired(false);
     } catch (error: any) {
       console.error('Incremental Sync error:', error);
