@@ -301,11 +301,11 @@ export default function POS({
   // Keep the selected customer in sync with the active branch - if the
   // branch tab changes (or the current selection no longer belongs to this
   // branch), fall back to the first customer of the new branch's list.
-  useMemo(() => {
+  useEffect(() => {
     if (!activeCustomers.some(c => c.id === selectedCustomerId)) {
       setSelectedCustomerId(activeCustomers[0]?.id || '');
     }
-  }, [activeCustomers]);
+  }, [activeCustomers, selectedCustomerId]);
 
   // Combine services and products for item catalog
   const catalog = useMemo(() => {
