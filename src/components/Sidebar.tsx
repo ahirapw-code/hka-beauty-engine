@@ -345,7 +345,7 @@ export default function Sidebar({
                 onClose();
               }
             }}
-            className="fixed inset-y-0 left-0 z-50 w-64 bg-[#1a1c1e] text-slate-100 flex flex-col h-screen border-r border-slate-800 shadow-2xl touch-pan-y"
+            className="fixed inset-y-0 left-0 z-50 w-64 bg-[#1a1c1e] text-slate-100 flex flex-col h-dvh max-h-dvh border-r border-slate-800 shadow-2xl touch-pan-y"
           >
             {sidebarContent}
           </motion.div>
