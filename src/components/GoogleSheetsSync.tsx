@@ -58,7 +58,7 @@ const APPS_SCRIPT_CODE = `// Google Apps Script Web App Code
 // This version auto-creates every tab & header row your HKA Engine app expects.
 
 var SHEET_SCHEMAS = {
-  'Customers':   ['id','name','email','phone','totalSpend','visitsCount','lastVisit','notes','preferredBranch'],
+  'Customers':   ['id','name','email','phone','totalSpend','visitsCount','lastVisit','notes','preferredBranch','isMember','memberSince'],
   'Bookings':    ['id','customerName','customerPhone','serviceId','serviceName','therapistId','therapistName','branch','date','time','duration','price','status','notes'],
   'Transactions':['id','date','customerName','branch','subtotal','discount','total','paymentMethod','cashierName','items_json'],
   'Therapists':  ['id','name','branch','specialties','rating','commissionRate','totalCommissionEarned','status','monthlyTarget','currentSales','baseSalary','linkedUserId'],

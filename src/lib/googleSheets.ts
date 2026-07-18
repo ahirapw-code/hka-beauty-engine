@@ -306,10 +306,10 @@ export const writeAllDataToSpreadsheet = async (
 
   const batchData = [
     {
-      range: 'Customers!A1:I',
+      range: 'Customers!A1:K',
       values: [
-        ['id', 'name', 'email', 'phone', 'totalSpend', 'visitsCount', 'lastVisit', 'notes', 'preferredBranch'],
-        ...data.customers.map(c => [c.id, c.name, c.email, c.phone, c.totalSpend, c.visitsCount, c.lastVisit || '', c.notes || '', c.preferredBranch])
+        ['id', 'name', 'email', 'phone', 'totalSpend', 'visitsCount', 'lastVisit', 'notes', 'preferredBranch', 'isMember', 'memberSince'],
+        ...data.customers.map(c => [c.id, c.name, c.email, c.phone, c.totalSpend, c.visitsCount, c.lastVisit || '', c.notes || '', c.preferredBranch, c.isMember ? 'TRUE' : 'FALSE', c.memberSince || ''])
       ]
     },
     {
@@ -391,7 +391,7 @@ export const writeAllDataToSpreadsheet = async (
 export const readAllDataFromSpreadsheet = async (spreadsheetId: string, accessToken: string) => {
   await ensureSheetsExist(spreadsheetId, accessToken);
 
-  const ranges = ['Customers!A1:I', 'Bookings!A1:N', 'Transactions!A1:J', 'Therapists!A1:L', 'Products!A1:I', 'Services!A1:F', 'Expenses!A1:F', 'Attendance!A1:J', 'Users!A1:G'];
+  const ranges = ['Customers!A1:K', 'Bookings!A1:N', 'Transactions!A1:J', 'Therapists!A1:L', 'Products!A1:I', 'Services!A1:F', 'Expenses!A1:F', 'Attendance!A1:J', 'Users!A1:G'];
   // valueRenderOption=UNFORMATTED_VALUE is critical here: without it, Sheets
   // returns cells as their *display* string (e.g. "Rp50.000" for a
   // currency-formatted price cell). Number("Rp50.000") is NaN, which
@@ -452,7 +452,7 @@ export interface SyncResult {
 export const recordToRow = (sheetName: string, item: any): any[] => {
   switch (sheetName) {
     case 'Customers':
-      return [item.id, item.name, item.email, item.phone, String(item.totalSpend), String(item.visitsCount), item.lastVisit || '', item.notes || '', item.preferredBranch];
+      return [item.id, item.name, item.email, item.phone, String(item.totalSpend), String(item.visitsCount), item.lastVisit || '', item.notes || '', item.preferredBranch, item.isMember ? 'TRUE' : 'FALSE', item.memberSince || ''];
     case 'Bookings':
       return [item.id, item.customerName, item.customerPhone, item.serviceId, item.serviceName, item.therapistId, item.therapistName, item.branch, item.date, item.time, String(item.duration), String(item.price), item.status, item.notes || ''];
     case 'Transactions':
@@ -511,6 +511,11 @@ export const parseRawSheetValues = (sheetName: string, headers: string[], rows: 
       const val = row[i];
       if (['totalSpend', 'visitsCount', 'price', 'duration', 'subtotal', 'discount', 'total', 'rating', 'commissionRate', 'totalCommissionEarned', 'monthlyTarget', 'currentSales', 'cost', 'stock', 'minStock', 'amount', 'baseSalary'].includes(header)) {
         obj[header] = parseNumericCell(val);
+      } else if (header === 'isMember') {
+        // Sheets can hand this back as a real boolean (checkbox-formatted
+        // cell) or as text ('TRUE'/'FALSE'/'1') depending on how the cell
+        // was entered - normalize both to a real boolean either way.
+        obj[header] = val === true || String(val).trim().toUpperCase() === 'TRUE' || String(val).trim() === '1';
       } else if (header === 'specialties' || header === 'branches') {
         obj[header] = val ? val.split(',') : [];
       } else if (header === 'items_json') {
@@ -576,7 +581,7 @@ export const syncStateToSpreadsheetIncremental = async (
     remoteDataRaw = json.data;
   } else {
     if (!accessToken) throw new Error('SESSION_EXPIRED');
-    const ranges = ['Customers!A1:I', 'Bookings!A1:N', 'Transactions!A1:J', 'Therapists!A1:L', 'Products!A1:I', 'Services!A1:F', 'Expenses!A1:F', 'Attendance!A1:J', 'Users!A1:G'];
+    const ranges = ['Customers!A1:K', 'Bookings!A1:N', 'Transactions!A1:J', 'Therapists!A1:L', 'Products!A1:I', 'Services!A1:F', 'Expenses!A1:F', 'Attendance!A1:J', 'Users!A1:G'];
     // See note in readAllDataFromSpreadsheet: UNFORMATTED_VALUE avoids reading
     // currency-formatted price cells back as strings like "Rp50.000".
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?ranges=${ranges.join('&ranges=')}&valueRenderOption=UNFORMATTED_VALUE`;
@@ -644,7 +649,7 @@ export const syncStateToSpreadsheetIncremental = async (
     let setLocalRecords: (items: any[]) => void = () => {};
     let lastCol = 'I';
 
-    if (sheetName === 'Customers') { localRecords = localData.customers; setLocalRecords = (it) => { updatedLocalData.customers = it; }; lastCol = 'I'; }
+    if (sheetName === 'Customers') { localRecords = localData.customers; setLocalRecords = (it) => { updatedLocalData.customers = it; }; lastCol = 'K'; }
     else if (sheetName === 'Bookings') { localRecords = localData.bookings; setLocalRecords = (it) => { updatedLocalData.bookings = it; }; lastCol = 'N'; }
     else if (sheetName === 'Transactions') { localRecords = localData.transactions; setLocalRecords = (it) => { updatedLocalData.transactions = it; }; lastCol = 'J'; }
     else if (sheetName === 'Therapists') { localRecords = localData.therapists; setLocalRecords = (it) => { updatedLocalData.therapists = it; }; lastCol = 'L'; }
@@ -788,7 +793,7 @@ export const syncStateToSpreadsheetIncremental = async (
       const N = remoteRows.length;
       let lastCol = 'I';
       let headers: string[] = [];
-      if (sheetName === 'Customers') { lastCol = 'I'; headers = ['id', 'name', 'email', 'phone', 'totalSpend', 'visitsCount', 'lastVisit', 'notes', 'preferredBranch']; }
+      if (sheetName === 'Customers') { lastCol = 'K'; headers = ['id', 'name', 'email', 'phone', 'totalSpend', 'visitsCount', 'lastVisit', 'notes', 'preferredBranch', 'isMember', 'memberSince']; }
       else if (sheetName === 'Bookings') { lastCol = 'N'; headers = ['id', 'customerName', 'customerPhone', 'serviceId', 'serviceName', 'therapistId', 'therapistName', 'branch', 'date', 'time', 'duration', 'price', 'status', 'notes']; }
       else if (sheetName === 'Transactions') { lastCol = 'J'; headers = ['id', 'date', 'customerName', 'branch', 'subtotal', 'discount', 'total', 'paymentMethod', 'cashierName', 'items_json']; }
       else if (sheetName === 'Therapists') { lastCol = 'L'; headers = ['id', 'name', 'branch', 'specialties', 'rating', 'commissionRate', 'totalCommissionEarned', 'status', 'monthlyTarget', 'currentSales', 'baseSalary', 'linkedUserId']; }
