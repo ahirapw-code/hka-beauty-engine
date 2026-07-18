@@ -6,6 +6,11 @@
 // working with only their import statements changed.
 
 const TOKEN_STORAGE_KEY = "hka_auth_token";
+// Set right before we force-clear a session because the server told us the
+// token is invalid/expired (401). Login.tsx reads + clears this once on
+// mount to show "your session expired, please sign in again" instead of
+// silently landing back on a blank sign-in form with no explanation.
+const SESSION_EXPIRED_KEY = "hka_session_expired";
 
 export interface ShimUser {
   uid: string;
@@ -119,6 +124,41 @@ export const secondaryAuth = new AuthClient({ persist: false });
 
 export function getAuthToken(): string | null {
   return auth.getToken();
+}
+
+/**
+ * Call this whenever an authenticated request comes back 401 ("Unauthorized:
+ * Invalid auth token."). A stored token can go bad for entirely normal
+ * reasons (it expired, the server secret rotated, etc.) - previously that
+ * just made whichever single request happened to hit it fail, while the
+ * rest of the UI (still showing cached/previously-loaded data) looked
+ * perfectly fine. That was especially confusing on mobile sessions left
+ * open for a while: Branch Settings saves and background Google Sheets
+ * sync would both silently fail with no clear next step.
+ *
+ * This clears the dead token, flags that the session expired so Login.tsx
+ * can explain why the person is suddenly signed out, and forces a clean
+ * re-login - which is the only way forward once the server has rejected
+ * the token anyway.
+ */
+export function notifyUnauthorized() {
+  try {
+    sessionStorage.setItem(SESSION_EXPIRED_KEY, "1");
+  } catch {
+    /* ignore storage errors */
+  }
+  auth.signOut();
+}
+
+/** Read-and-clear so the banner only ever shows once, right after it happens. */
+export function consumeSessionExpiredFlag(): boolean {
+  try {
+    const flagged = sessionStorage.getItem(SESSION_EXPIRED_KEY) === "1";
+    if (flagged) sessionStorage.removeItem(SESSION_EXPIRED_KEY);
+    return flagged;
+  } catch {
+    return false;
+  }
 }
 
 async function apiFetch(path: string, body: any) {

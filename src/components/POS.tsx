@@ -683,6 +683,27 @@ export default function POS({
             <span className="text-xs font-mono text-slate-400 font-bold">{cart.length} items</span>
           </div>
 
+          {/* Full cart contents at a glance. The detailed cards below are
+              scrollable and can hide items above/below the fold - this strip
+              never scrolls, so every treatment/product currently in the
+              cart is always visible before checkout, not just whichever
+              ones happen to be in view further down. */}
+          {cart.length > 0 && (
+            <div className="shrink-0 py-3 border-b border-slate-800 flex flex-wrap gap-1.5 max-h-28 overflow-y-auto">
+              {cart.map((item) => (
+                <div
+                  key={`overview-${item.id}-${item.type}`}
+                  className="flex items-center gap-1.5 bg-slate-800/60 border border-slate-700/60 rounded-full pl-2.5 pr-2 py-1 max-w-full"
+                >
+                  <span className="text-[10px] text-slate-200 font-medium truncate max-w-[140px]">{item.name}</span>
+                  {item.quantity > 1 && (
+                    <span className="text-[10px] text-[#D4AF37] font-mono font-bold shrink-0">×{item.quantity}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Customer Select / Add Section */}
           <div className="py-4 border-b border-slate-800 shrink-0">
             {!showAddCustomer ? (
@@ -781,7 +802,8 @@ export default function POS({
           </div>
 
           {/* Cart items list */}
-          <div className="flex-1 overflow-y-auto py-4 space-y-3 pr-1">
+          <div className="relative flex-1 min-h-0">
+          <div className="h-full overflow-y-auto py-4 space-y-3 pr-1">
             {cart.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-slate-500 py-12">
                 <ShoppingBag className="w-10 h-10 text-slate-700 mb-3" />
@@ -872,6 +894,10 @@ export default function POS({
                 </div>
               ))
             )}
+          </div>
+          {cart.length > 0 && (
+            <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-slate-900 to-transparent" />
+          )}
           </div>
 
           {/* Receipt Totals / Checkout footer */}

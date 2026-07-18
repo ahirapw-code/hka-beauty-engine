@@ -1,4 +1,5 @@
 import { auth } from './firebase';
+import { notifyUnauthorized } from './authClient';
 import { Customer, Booking, Transaction, Therapist, Product, Service, Expense, Attendance } from '../types';
 
 /**
@@ -55,6 +56,13 @@ export async function persistSheetsSyncToServer(
 
   if (!response.ok) {
     const errData = await response.json().catch(() => ({}));
+    // Same dead-token situation as authFetch (src/lib/firestoreClient.ts):
+    // a 401 here means the sync itself is fine, the session isn't. Force a
+    // clean re-login instead of letting this look like a generic sync error
+    // that "Sinkronisasikan Sekarang" will just keep failing on forever.
+    if (response.status === 401) {
+      notifyUnauthorized();
+    }
     throw new Error(errData.error || `Failed to persist Sheets sync (status ${response.status})`);
   }
 }

@@ -25,6 +25,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { doc, onSnapshot, setDoc } from '../lib/firestoreClient';
 import { db, auth } from '../lib/firebase';
 import { persistSheetsSyncToServer } from '../lib/sheetsPersist';
+import { notifyUnauthorized } from '../lib/authClient';
 
 interface GoogleSheetsSyncProps {
   customers: Customer[];
@@ -448,6 +449,14 @@ export default function GoogleSheetsSync({
                 setConflictLogs(prev => [...prev, ...syncJson.warnings]);
               }
             }
+          } else if (syncRes.status === 401) {
+            // Dead token - same handling as every other authenticated call
+            // (src/lib/firestoreClient.ts, src/lib/sheetsPersist.ts). Left
+            // unhandled here, this call would just keep quietly failing
+            // (only logged to console) on every 30s auto-sync tick without
+            // ever telling the person their session needs a fresh login.
+            notifyUnauthorized();
+            console.error("Backend payroll sync failed: session expired.");
           } else {
             console.error("Backend payroll sync failed");
           }

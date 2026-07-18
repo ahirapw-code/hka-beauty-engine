@@ -5,7 +5,8 @@ import {
   signInWithPopup, 
   GoogleAuthProvider,
   sendPasswordResetEmail,
-  updatePassword
+  updatePassword,
+  consumeSessionExpiredFlag
 } from '../lib/authClient';
 import { doc, getDoc, setDoc } from '../lib/firestoreClient';
 import { auth, db, secondaryAuth, handleFirestoreError, OperationType } from '../lib/firebase';
@@ -43,6 +44,13 @@ export default function Login({ onLoginSuccess, usersList = PRESET_USERS }: Logi
   // Async states
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  // Set once, on first mount, if we landed here because a request elsewhere
+  // in the app (Branch Settings save, background Sheets sync, etc) got a
+  // 401 and force-cleared the session (see notifyUnauthorized in
+  // ../lib/authClient.ts). Without this, re-appearing on a blank sign-in
+  // screen with zero explanation looked exactly like "the app is broken"
+  // rather than "please sign in again".
+  const [sessionExpired] = useState(() => consumeSessionExpiredFlag());
   const [resetSent, setResetSent] = useState(false);
   const [seeding, setSeeding] = useState(false);
   const [seedSuccess, setSeedSuccess] = useState('');
@@ -561,6 +569,12 @@ export default function Login({ onLoginSuccess, usersList = PRESET_USERS }: Logi
           ) : (
             /* Main Authentication Forms */
             <div>
+              {sessionExpired && (
+                <div className="mb-6 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-3.5 text-xs font-medium leading-relaxed">
+                  Sesi Anda telah berakhir, jadi Anda otomatis keluar. Silakan login kembali untuk melanjutkan.
+                </div>
+              )}
+
               {/* Tab Selector */}
               {activeTab !== 'forgot' && (
                 <div className="flex bg-slate-100 p-1.5 rounded-2xl mb-8">

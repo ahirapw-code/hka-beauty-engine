@@ -4,7 +4,7 @@
 // `getDoc`, `getDocs`, `setDoc`, `updateDoc`, `deleteDoc`, `onSnapshot`,
 // `query`, `where`, `orderBy`, `writeBatch`) keep working unchanged after
 // removing the `firebase` package.
-import { getAuthToken } from "./authClient";
+import { getAuthToken, notifyUnauthorized } from "./authClient";
 
 export interface DbHandle {
   __isDb: true;
@@ -76,6 +76,14 @@ async function authFetch(url: string, init: RequestInit = {}) {
   const res = await fetch(url, { ...init, headers });
   if (!res.ok) {
     const errData = await res.json().catch(() => ({}));
+    // A 401 here means the stored token itself is dead (expired / invalid) -
+    // not that this one request failed for its own reasons. Every other
+    // request in the app goes through this same authFetch, so left alone
+    // the person would just keep hitting the same wall on the next click
+    // (e.g. Branch Settings' "Simpan Perubahan") with no indication why.
+    if (res.status === 401) {
+      notifyUnauthorized();
+    }
     throw new Error(errData.error || `Request failed with status ${res.status}`);
   }
   return res.json();
