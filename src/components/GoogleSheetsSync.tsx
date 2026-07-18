@@ -241,6 +241,12 @@ export default function GoogleSheetsSync({
 
   const isHQManagement = currentUser?.role === 'HKA_MANAGEMENT';
   const isSyncingRef = useRef(false);
+  // True when the most recent sync read/merged the Sheet fine but could
+  // NOT save the result to the database because the logged-in role isn't
+  // allowed to (see canPersist below - by design for THERAPIST accounts).
+  // Surfaced as a calm, honest status instead of silently showing
+  // "success" for a sync that didn't actually persist anything.
+  const [persistBlockedForRole, setPersistBlockedForRole] = useState(false);
 
   // Always-fresh snapshot of the data props, read by handleIncrementalSync
   // at call time, so the scheduling effect below doesn't need to restart
@@ -386,6 +392,7 @@ export default function GoogleSheetsSync({
       // vanishes after refresh" bug, so make it loud.
       const canPersist = currentUser?.role === 'HKA_MANAGEMENT' || currentUser?.role === 'SALON_MANAGER';
       let persistFailed = false;
+      setPersistBlockedForRole(false);
       try {
         await persistSheetsSyncToServer(result.updatedLocalData, result.deletedIds);
       } catch (persistErr: any) {
@@ -401,6 +408,15 @@ export default function GoogleSheetsSync({
             `Perubahan dari Sheet berhasil dibaca, TAPI GAGAL disimpan ke database (${msg}). ` +
             `Perubahan ini akan hilang lagi saat halaman di-refresh. Coba "Sinkronisasikan Sekarang" lagi.`
           );
+        } else {
+          // Expected for THERAPIST accounts - they can read the latest
+          // Sheet data, but only management can write the reconciled
+          // result back to the database. This used to be swallowed
+          // entirely, which meant the UI showed a plain green "success"
+          // for a sync that silently saved nothing - indistinguishable
+          // from a real, fully-successful sync. Surface it honestly (but
+          // calmly, not as a scary red error) instead.
+          setPersistBlockedForRole(true);
         }
       }
 
@@ -638,7 +654,7 @@ export default function GoogleSheetsSync({
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 10 }}
-              className="absolute right-0 mt-2.5 w-85 bg-white rounded-2xl border border-slate-100 shadow-xl z-50 p-5 space-y-4 text-slate-800 max-h-[80vh] overflow-y-auto"
+              className="absolute right-0 mt-2.5 w-[min(340px,calc(100vw-2rem))] bg-white rounded-2xl border border-slate-100 shadow-xl z-50 p-5 space-y-4 text-slate-800 max-h-[80vh] overflow-y-auto"
             >
               {/* Header */}
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
@@ -929,6 +945,21 @@ export default function GoogleSheetsSync({
                 <div className="bg-rose-50 border border-rose-100 text-rose-800 rounded-xl p-3 text-xs flex items-start gap-2">
                   <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
                   <p className="leading-normal flex-1">{errorMessage}</p>
+                </div>
+              )}
+
+              {/* Honest status for a sync that read the Sheet fine but
+                  couldn't be saved to the database because of this
+                  account's role - previously this looked identical to a
+                  fully successful sync, with no indication anything was
+                  missing. */}
+              {persistBlockedForRole && !errorMessage && (
+                <div className="bg-amber-50 border border-amber-100 text-amber-800 rounded-xl p-3 text-xs flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                  <p className="leading-normal flex-1">
+                    Data terbaru dari Sheet sudah dibaca, tapi akun Anda ({currentUser?.role}) tidak bisa menyimpannya ke database.
+                    Minta Manager cabang atau HKA Management untuk menekan "Sinkronisasikan Sekarang" agar perubahan benar-benar tersimpan.
+                  </p>
                 </div>
               )}
 
