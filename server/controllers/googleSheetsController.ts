@@ -92,16 +92,22 @@ function diffNonNegativeField(
 /**
  * PATCH /api/therapists/:id/commission-adjustment
  *
- * The one deliberate, audited exception to `totalCommissionEarned` being
+ * One of two deliberate, audited exceptions to `totalCommissionEarned` being
  * write-locked (see AUDIT_OWNED_FIELDS in sheetsPersistController.ts and
  * PROTECTED_FIELDS in middleware/authorize.ts). That field is normally only
- * ever incremented by processCheckout as sales happen - editing it in the
- * connected Google Sheet is a no-op by design (the sync silently drops it),
- * which previously left no way to correct it at all (e.g. after a payroll
- * payout, or to fix a bad accrual) without going around the API straight
- * into Mongo. This gives HKA_MANAGEMENT a real, audited path instead:
- * every change is logged to PayrollAuditLog with the old/new value, same
- * as commissionRate/baseSalary changes from the Sheets sync.
+ * ever incremented by processCheckout as sales happen - editing it directly
+ * through the generic bidirectional Sheets sync is a no-op by design (that
+ * sync silently drops it). This endpoint gives HKA_MANAGEMENT a real,
+ * audited path for one-off corrections from inside the app itself (e.g.
+ * after a payroll payout, or to fix a bad accrual): every change is logged
+ * to PayrollAuditLog with the old/new value, same as commissionRate/
+ * baseSalary changes from the Sheets sync.
+ *
+ * The other exception is POST /api/syncSheetsToFirestore below, which reads
+ * `totalCommissionEarned` straight from the "Therapists" tab (alongside
+ * commissionRate/baseSalary) so it can be corrected from the spreadsheet
+ * too - same HKA_MANAGEMENT gate, same audit trail, just triggered from a
+ * Sheets edit instead of a click in the app.
  */
 export async function adjustTherapistCommission(req: Request, res: Response) {
   try {
@@ -154,16 +160,18 @@ export async function adjustTherapistCommission(req: Request, res: Response) {
  * datastore is now MongoDB. Direct Mongoose port of the original logic.
  *
  * Reads two tabs:
- *  - "Therapists" -> updates Therapist.commissionRate / .baseSalary
+ *  - "Therapists" -> updates Therapist.commissionRate / .baseSalary /
+ *    .totalCommissionEarned
  *  - "Managers"   -> updates User.commissionRate / .baseSalary / .monthlyTarget,
  *    but ONLY for documents whose role is already SALON_MANAGER (a row that
  *    doesn't match an existing Salon Manager account - wrong id, therapist
  *    id reused by mistake, etc - is skipped with a warning instead of
  *    silently touching the wrong user).
- * Both are payroll-sensitive fields, so both go through this same
+ * All are payroll-sensitive fields, so all go through this same
  * HKA_MANAGEMENT-only, audited, one-way (sheet -> DB) path rather than the
  * generic bidirectional Sheets sync - identical reasoning for each: comp
- * data must never be silently overwritten by an unrelated Sheets edit.
+ * data must never be silently overwritten by an unrelated Sheets edit
+ * without an audit trail.
  */
 export async function syncSheetsToFirestore(req: Request, res: Response) {
   try {
@@ -247,6 +255,7 @@ export async function syncSheetsToFirestore(req: Request, res: Response) {
       const idIndex = headers.indexOf("id");
       const commissionRateIndex = headers.indexOf("commissionRate");
       const baseSalaryIndex = headers.indexOf("baseSalary");
+      const totalCommissionEarnedIndex = headers.indexOf("totalCommissionEarned");
 
       if (idIndex === -1) {
         warnings.push("Kolom 'id' tidak ditemukan di tab Therapists pada Google Sheets - tab ini dilewati.");
@@ -258,7 +267,7 @@ export async function syncSheetsToFirestore(req: Request, res: Response) {
           const fsData = await Therapist.findById(therapistId);
           if (!fsData) continue; // Skip if therapist doesn't exist
 
-          const changes = diffRateAndSalary(
+          const changes: { commissionRate?: number; baseSalary?: number; totalCommissionEarned?: number } = diffRateAndSalary(
             row,
             commissionRateIndex,
             baseSalaryIndex,
@@ -268,7 +277,29 @@ export async function syncSheetsToFirestore(req: Request, res: Response) {
             warnings
           );
 
-          if (changes.commissionRate === undefined && changes.baseSalary === undefined) continue;
+          // totalCommissionEarned is normally only ever incremented by
+          // processCheckout (see AUDIT_OWNED_FIELDS in
+          // sheetsPersistController.ts / PROTECTED_FIELDS in
+          // middleware/authorize.ts), so the generic bidirectional Sheets
+          // sync silently drops it - editing it in Sheets used to be a
+          // no-op. This is the second deliberate, audited exception (the
+          // first being PATCH /api/therapists/:id/commission-adjustment
+          // below): same HKA_MANAGEMENT-only gate, same PayrollAuditLog
+          // trail, just triggered from a Sheets edit instead of the app's
+          // pencil-icon adjuster.
+          const totalCommissionEarnedChange = diffNonNegativeField(
+            row,
+            totalCommissionEarnedIndex,
+            fsData.totalCommissionEarned,
+            "totalCommissionEarned",
+            `therapist ${fsData.name || therapistId}`,
+            warnings
+          );
+          if (totalCommissionEarnedChange !== undefined) {
+            changes.totalCommissionEarned = totalCommissionEarnedChange;
+          }
+
+          if (changes.commissionRate === undefined && changes.baseSalary === undefined && changes.totalCommissionEarned === undefined) continue;
 
           const auditLogsToWrite: any[] = [];
           if (changes.commissionRate !== undefined) {
@@ -289,6 +320,17 @@ export async function syncSheetsToFirestore(req: Request, res: Response) {
               field: "baseSalary",
               oldValue: fsData.baseSalary ?? null,
               newValue: changes.baseSalary,
+              source: "google_sheets_sync",
+              timestamp: syncTimestamp,
+            });
+          }
+          if (changes.totalCommissionEarned !== undefined) {
+            auditLogsToWrite.push({
+              therapistId,
+              staffType: "therapist",
+              field: "totalCommissionEarned",
+              oldValue: fsData.totalCommissionEarned ?? null,
+              newValue: changes.totalCommissionEarned,
               source: "google_sheets_sync",
               timestamp: syncTimestamp,
             });
