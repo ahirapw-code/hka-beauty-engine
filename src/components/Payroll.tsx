@@ -575,7 +575,9 @@ export default function PayrollComponent({ user, selectedBranch: initialBranch }
                         <td className="p-4 text-right font-mono text-slate-600">
                           {formatIDR(baseSalary)}
                           <div className="text-[9px] text-slate-400 font-mono normal-case mt-0.5">
-                            {formatIDR(therapist.baseSalary || 0)}/hari &times; {daysPresent} hari
+                            {isSaved
+                              ? 'Tersimpan (payroll sudah dibuat)'
+                              : `${formatIDR(therapist.baseSalary || 0)}/hari \u00d7 ${daysPresent} hari`}
                           </div>
                         </td>
 
