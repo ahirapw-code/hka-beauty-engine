@@ -106,7 +106,7 @@ export default function Sidebar({
     { id: 'pos', label: 'Point of Sale (POS)', icon: CreditCard, roles: ['HKA_MANAGEMENT', 'SALON_MANAGER', 'THERAPIST'] },
     { id: 'bookings', label: 'Bookings & Planner', icon: CalendarDays, roles: ['HKA_MANAGEMENT', 'SALON_MANAGER', 'THERAPIST'] },
     { id: 'erp', label: 'ERP & Inventory', icon: Package, roles: ['HKA_MANAGEMENT'] },
-    { id: 'crm', label: 'CRM Clients', icon: Users, roles: ['HKA_MANAGEMENT', 'SALON_MANAGER'] },
+    { id: 'crm', label: 'CRM Clients', icon: Users, roles: ['HKA_MANAGEMENT'] },
     { id: 'attendance', label: 'Attendance Audit', icon: UserCheck, roles: ['HKA_MANAGEMENT', 'SALON_MANAGER'] },
     { id: 'payroll', label: 'Payroll & Komisi', icon: Coins, roles: ['HKA_MANAGEMENT', 'SALON_MANAGER'] },
     { id: 'my-payroll', label: 'Slip Gaji Saya', icon: Wallet, roles: ['SALON_MANAGER', 'THERAPIST'] },

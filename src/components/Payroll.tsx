@@ -85,7 +85,10 @@ export default function PayrollComponent({ user, selectedBranch: initialBranch }
         const params = new URLSearchParams({
           branch: selectedBranch,
           periodMonth: selectedMonth,
-          staffType: activeTab,
+          // activeTab is 'therapists' / 'managers' (matches the tab UI),
+          // but the API expects the singular form - mismatch here was
+          // causing every payroll load to fail with "Invalid staffType".
+          staffType: activeTab === 'therapists' ? 'therapist' : 'manager',
         });
         const response = await fetch(`/api/payroll/preview?${params.toString()}`, {
           headers: {
