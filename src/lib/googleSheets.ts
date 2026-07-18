@@ -634,6 +634,11 @@ export const syncStateToSpreadsheetIncremental = async (
     const remoteRows = remoteDataRaw[sheetName] || [];
     const headers = remoteRows[0] || [];
     const dataRows = remoteRows.slice(1);
+    // True only when the read succeeded (we have a header row) AND every
+    // data row underneath it is gone - i.e. someone deliberately cleared
+    // the whole tab down to just headers. Distinct from headers.length===0
+    // below, which means the read itself failed/hit the wrong tab.
+    const sheetIsEmptied = headers.length > 0 && dataRows.length === 0;
 
     // Map: id -> { rowNum, values }
     const remoteMap = new Map<string, { rowIndex: number; rowValues: any[] }>();
@@ -725,7 +730,24 @@ export const syncStateToSpreadsheetIncremental = async (
           }
         }
       } else {
-        if (lastSyncedRow) {
+        if (sheetIsEmptied) {
+          // The whole tab (aside from its header row) is empty. Treat this
+          // as an explicit, deliberate reset of this collection - not as
+          // "this record just hasn't synced yet". Without this check, any
+          // local record with no lastSyncedRow baseline (e.g. created after
+          // the last successful sync, or first-ever sync on this
+          // browser/device) fell straight into the "New local record"
+          // branch below and got appended right back into a tab someone
+          // had just cleared out by hand, making a manual full-tab reset
+          // impossible. An emptied tab is checked first, ahead of the
+          // baseline check, so it wins regardless of baseline state.
+          conflictLog.push(
+            `Tab ${sheetName} dikosongkan (hanya header tersisa) - record ${id} dianggap sengaja dihapus, ikut dihapus dari app & database.`
+          );
+          deletedIds[sheetName] = deletedIds[sheetName] || [];
+          deletedIds[sheetName].push(id);
+          // Not pushed to nextLocalRecords, and no baseline kept - it's gone.
+        } else if (lastSyncedRow) {
           if (headers.length === 0) {
             // The read for this whole sheet came back with no header row -
             // that means the read itself failed or hit the wrong tab, not
