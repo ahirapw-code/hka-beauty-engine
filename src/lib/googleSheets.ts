@@ -641,6 +641,16 @@ export const syncStateToSpreadsheetIncremental = async (
       const id = row[0];
       if (id) {
         remoteMap.set(id, { rowIndex: idx + 2, rowValues: row });
+      } else if (row.some((cell) => cell !== undefined && cell !== null && String(cell).trim() !== '')) {
+        // Row has real content (e.g. someone typed isMember/memberSince by
+        // hand) but column A (id) is blank - this row is invisible to the
+        // sync engine and will silently never update anything. Previously
+        // this was dropped with no trace, which looks exactly like "I set
+        // isMember in the sheet but it never sticks" when the real cause is
+        // a missing/blank id cell on that specific row.
+        conflictLog.push(
+          `Baris ${idx + 2} di tab ${sheetName} punya data tapi kolom "id" kosong - baris ini dilewati (tidak disinkronkan). Isi kolom id dengan ID customer/record yang benar dari app.`
+        );
       }
     });
 
