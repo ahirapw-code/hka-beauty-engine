@@ -73,12 +73,34 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 }
 
 // 1. ADD CUSTOMER
-export async function addCustomer(customer: Customer): Promise<void> {
-  const path = `customers/${customer.id}`;
+// "customers" is write-locked in the generic /api/data API (managed via
+// Google Sheets - see server/middleware/authorize.ts), so creating a new
+// client profile goes through its own narrow, dedicated endpoint instead
+// of setDoc - same carve-out pattern as addTherapist below. The server
+// assigns the real id and always starts totalSpend/visitsCount at 0; the
+// `customer.id` placeholder passed in by the caller (App.tsx's
+// handleAddCustomer) is discarded, not sent.
+export async function addCustomer(customer: Customer): Promise<Customer> {
+  const path = `customers`;
   try {
-    await setDoc(doc(db, 'customers', customer.id), customer);
+    const { id: _drop, totalSpend: _ts, visitsCount: _vc, ...payload } = customer;
+    const idToken = await auth.currentUser?.getIdToken();
+    const response = await fetch('/api/customers', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {})
+      },
+      body: JSON.stringify(payload)
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || `Failed to add client profile (status ${response.status})`);
+    }
+    return data.data as Customer;
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);
+    throw error;
   }
 }
 
@@ -227,20 +249,16 @@ export async function addTransaction(
   products: Product[],
   therapists: Therapist[],
   invoiceDiscountValue: number = 0,
-  invoiceDiscountType: 'percent' | 'flat' = 'flat',
-  // Callers that want a *safe-to-retry* checkout (e.g. a cashier tapping
-  // "Coba Lagi" after a network hiccup, per the UX fix in POS.tsx) should
-  // generate this once for a given cart/sale and pass the *same* value on
-  // every retry attempt, so the server's idempotency check recognizes the
-  // retry as the same sale instead of creating a duplicate transaction.
-  // If omitted, a fresh key is generated here (previous behavior) - fine
-  // for one-shot, non-retried calls like the booking auto-checkout path.
-  idempotencyKey: string = crypto.randomUUID()
+  invoiceDiscountType: 'percent' | 'flat' = 'flat'
 ): Promise<string> {
   const txPath = `transactions/${transaction.id}`;
 
   try {
     const idToken = await auth.currentUser?.getIdToken();
+    // Generated once per checkout attempt so a network-level retry of this
+    // exact request is recognized as a duplicate by the server instead of
+    // being processed twice.
+    const idempotencyKey = crypto.randomUUID();
 
     const response = await fetch('/api/processCheckout', {
       method: 'POST',
