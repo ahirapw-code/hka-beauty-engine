@@ -76,7 +76,7 @@ const POLICIES: Record<string, CollectionPolicy> = {
   attendance: {
     read: "all",
     write: ["HKA_MANAGEMENT"], // write-locked below anyway; corrections only
-    selfScopedFor: ["THERAPIST"],
+    selfScopedFor: ["THERAPIST", "SALON_MANAGER"],
     ownerField: "userId",
   },
   bookings: { read: "all", write: ALL_ROLES },
