@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, Branch, Therapist, Payroll } from '../types';
 import { db, auth } from '../lib/firebase';
-import { collection, doc, setDoc, updateDoc, deleteDoc, getDocs, query, where } from '../lib/firestoreClient';
-import { calculateTherapistPayrollForPeriod, calculateStaffAttendance } from '../lib/payrollService';
+import { doc, setDoc, updateDoc, deleteDoc } from '../lib/firestoreClient';
 import { formatIDR } from '../utils';
 import { 
   Coins, 
@@ -73,33 +72,37 @@ export default function PayrollComponent({ user, selectedBranch: initialBranch }
       setIsLoading(true);
       setError(null);
       try {
-        // 1. Fetch existing payrolls for selected month and branch
-        const payrollRef = collection(db, 'payroll');
-        const pq = query(
-          payrollRef, 
-          where('branch', '==', selectedBranch), 
-          where('periodMonth', '==', selectedMonth)
-        );
-        const payrollSnap = await getDocs(pq);
-        const loadedPayrolls: Payroll[] = [];
-        payrollSnap.forEach(d => {
-          loadedPayrolls.push(d.data() as Payroll);
+        // Single server-side aggregation call instead of the previous
+        // pattern of: fetch the staff list, then loop over every single
+        // staff member firing 2-3 sequential HTTP round trips each
+        // (calculateTherapistPayrollForPeriod / calculateStaffAttendance).
+        // That sequential N+1 loop is what caused this screen to 504 once
+        // staff count grew - this replaces it with one request that does
+        // the same aggregation server-side in a handful of bulk queries.
+        const idToken = await auth.currentUser?.getIdToken();
+        const params = new URLSearchParams({
+          branch: selectedBranch,
+          periodMonth: selectedMonth,
+          staffType: activeTab,
         });
+        const response = await fetch(`/api/payroll/preview?${params.toString()}`, {
+          headers: {
+            ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+          },
+        });
+        const resData = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(resData.error || `Failed to load payroll preview (status ${response.status})`);
+        }
+
+        const loadedPayrolls: Payroll[] = resData.existingPayrolls || [];
         setExistingPayrolls(loadedPayrolls);
 
-        // 2. Fetch staff list based on active sub-tab
         if (activeTab === 'therapists') {
-          const therapistRef = collection(db, 'therapists');
-          const tq = query(therapistRef, where('branch', '==', selectedBranch));
-          const tSnap = await getDocs(tq);
-          const loadedTherapists: Therapist[] = [];
-          tSnap.forEach(d => {
-            loadedTherapists.push(d.data() as Therapist);
-          });
+          const loadedTherapists: Therapist[] = resData.staff || [];
           setTherapists(loadedTherapists);
 
-          // Calculate previews for therapists who don't have stored payrolls
-          const previews: typeof calculatedPreviews = {};
+          const previews: typeof calculatedPreviews = resData.previews || {};
           const inputs: typeof manualInputs = {};
 
           for (const therapist of loadedTherapists) {
@@ -109,9 +112,10 @@ export default function PayrollComponent({ user, selectedBranch: initialBranch }
                 bonus: existing.bonus,
                 deductions: existing.deductions
               };
+              // Already-generated payrolls are locked to their originally
+              // saved figures, not the freshly recalculated preview.
+              delete previews[therapist.id];
             } else {
-              const preview = await calculateTherapistPayrollForPeriod(therapist.id, selectedMonth);
-              previews[therapist.id] = preview;
               inputs[therapist.id] = {
                 bonus: 0,
                 deductions: 0
@@ -122,29 +126,11 @@ export default function PayrollComponent({ user, selectedBranch: initialBranch }
           setManualInputs(inputs);
 
         } else if (activeTab === 'managers' && isHKA) {
-          const usersRef = collection(db, 'users');
-          const uq = query(usersRef, where('role', '==', 'SALON_MANAGER'), where('branch', '==', selectedBranch));
-          const uSnap = await getDocs(uq);
-          const loadedManagers: User[] = [];
-          uSnap.forEach(d => {
-            loadedManagers.push(d.data() as User);
-          });
+          const loadedManagers: User[] = resData.staff || [];
           setManagers(loadedManagers);
+          setLinkedTherapistsByUserId(resData.linkedTherapistsByUserId || {});
 
-          // Look up which of these managers are dual-role (have a linked
-          // Therapist profile) so the table can show a small badge.
-          const therapistRef = collection(db, 'therapists');
-          const linkTq = query(therapistRef, where('branch', '==', selectedBranch));
-          const linkTSnap = await getDocs(linkTq);
-          const linkedMap: Record<string, Therapist> = {};
-          linkTSnap.forEach(d => {
-            const t = d.data() as Therapist;
-            if (t.linkedUserId) linkedMap[t.linkedUserId] = t;
-          });
-          setLinkedTherapistsByUserId(linkedMap);
-
-          // Calculate previews for managers who don't have stored payrolls
-          const previews: typeof calculatedPreviews = {};
+          const previews: typeof calculatedPreviews = resData.previews || {};
           const inputs: typeof manualInputs = {};
 
           for (const manager of loadedManagers) {
@@ -155,13 +141,8 @@ export default function PayrollComponent({ user, selectedBranch: initialBranch }
                 deductions: existing.deductions,
                 commissionEarned: existing.commissionEarned
               };
+              delete previews[manager.id];
             } else {
-              const daysPresent = await calculateStaffAttendance(manager.id, selectedMonth);
-              previews[manager.id] = {
-                baseSalary: manager.baseSalary || 0,
-                commissionEarned: 0,
-                daysPresent
-              };
               inputs[manager.id] = {
                 bonus: 0,
                 deductions: 0,

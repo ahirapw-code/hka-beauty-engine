@@ -403,7 +403,8 @@ export default function App() {
   const handleAddTransaction = async (
     newTx: Omit<Transaction, 'id' | 'date'>,
     invoiceDiscountValue: number = 0,
-    invoiceDiscountType: 'percent' | 'flat' = 'flat'
+    invoiceDiscountType: 'percent' | 'flat' = 'flat',
+    idempotencyKey?: string
   ): Promise<string> => {
     // id/date are placeholders only - the server assigns the authoritative
     // id and timestamp; callers should use the returned id, not this one.
@@ -413,7 +414,15 @@ export default function App() {
       ...newTx
     };
 
-    return addTransaction(completeTx, customers, products, therapists, invoiceDiscountValue, invoiceDiscountType);
+    return addTransaction(
+      completeTx,
+      customers,
+      products,
+      therapists,
+      invoiceDiscountValue,
+      invoiceDiscountType,
+      idempotencyKey
+    );
   };
 
   // 2. Client registration (CRM addition)
@@ -632,6 +641,7 @@ export default function App() {
             services={services}
             products={products}
             therapists={therapists}
+            users={usersList}
             onAddTransaction={handleAddTransaction}
             onAddCustomer={handleAddCustomer}
             onActivateMembership={handleActivateMembership}

@@ -32,10 +32,15 @@ interface POSProps {
   services: Service[];
   products: Product[];
   therapists: Therapist[];
+  // Full staff/user directory. Used only to auto-surface SALON_MANAGER
+  // accounts as assignable "therapists" in the POS (see activeTherapists
+  // below) - not for anything auth-related here.
+  users: User[];
   onAddTransaction: (
     tx: Omit<Transaction, 'id' | 'date'>,
     invoiceDiscountValue?: number,
-    invoiceDiscountType?: 'percent' | 'flat'
+    invoiceDiscountType?: 'percent' | 'flat',
+    idempotencyKey?: string
   ) => Promise<string>;
   onAddCustomer: (customer: Omit<Customer, 'id' | 'totalSpend' | 'visitsCount'>) => void;
   onActivateMembership: (customerId: string) => void;
@@ -48,6 +53,7 @@ export default function POS({
   services,
   products,
   therapists,
+  users,
   onAddTransaction,
   onAddCustomer,
   onActivateMembership
@@ -79,6 +85,16 @@ export default function POS({
   // Guards against double-submit (double-tap / accidental double-click),
   // which previously could send the same sale to processCheckout twice.
   const [isCheckingOut, setIsCheckingOut] = useState(false);
+  // Human-readable checkout failure shown as an inline banner (replaces
+  // the old raw alert() of Mongoose's internal error text). Cleared
+  // whenever a new checkout attempt starts or succeeds.
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  // Generated once per *distinct* checkout attempt (i.e. once for the
+  // current cart) and reused across "Coba Lagi" retries of that same
+  // attempt, so a retry is recognized by the server's idempotency check
+  // as the same sale rather than risking a duplicate transaction if the
+  // original request actually went through but the response was lost.
+  const checkoutIdempotencyKeyRef = React.useRef<string | null>(null);
   
   // Invoice-level discount
   const [invoiceDiscountValue, setInvoiceDiscountValue] = useState<number>(0);
@@ -237,9 +253,43 @@ export default function POS({
     return products.filter(p => p.branch === posBranch);
   }, [products, posBranch]);
 
+  // Structural fix: previously this only read the `therapists` collection,
+  // so a SALON_MANAGER never showed up as an assignable therapist in the
+  // POS unless someone manually created a duplicate Therapist record for
+  // them (via linkedUserId). Now every manager in the same branch is
+  // surfaced automatically, no duplicate entry required. A manager who
+  // *does* already have a linked Therapist record (dual-role staff who
+  // also perform services) keeps using that real record - we skip the
+  // synthetic one for them to avoid listing the same person twice.
   const activeTherapists = useMemo(() => {
-    return therapists.filter(t => t.branch === posBranch);
-  }, [therapists, posBranch]);
+    const realTherapists = therapists.filter(t => t.branch === posBranch);
+
+    const alreadyLinkedManagerIds = new Set(
+      therapists.filter(t => t.linkedUserId).map(t => t.linkedUserId as string)
+    );
+
+    const managerTherapists: Therapist[] = users
+      .filter(u =>
+        u.role === 'SALON_MANAGER' &&
+        (u.branch === posBranch || u.branch === 'ALL') &&
+        !alreadyLinkedManagerIds.has(u.id)
+      )
+      .map(u => ({
+        id: u.id,
+        name: `${u.name} (Manager)`,
+        branch: posBranch,
+        specialties: [],
+        rating: 0,
+        commissionRate: u.commissionRate || 0,
+        totalCommissionEarned: 0,
+        status: 'active',
+        monthlyTarget: u.monthlyTarget || 0,
+        currentSales: 0,
+        baseSalary: u.baseSalary || 0,
+      }));
+
+    return [...realTherapists, ...managerTherapists];
+  }, [therapists, users, posBranch]);
 
   // Customers are branch-specific too (separate NAO Studio / DIAEL Beauty
   // client bases) - only show the ones whose preferredBranch matches the
@@ -369,10 +419,19 @@ export default function POS({
     setCart(prev => prev.map(i => i.id === id && i.type === 'service' ? { ...i, therapistId } : i));
   };
 
-  const handleCheckout = async () => {
+  const handleCheckout = async (isRetry: boolean = false) => {
     if (cart.length === 0) return;
     if (isCheckingOut) return; // prevent double-submit from a double-tap/click
     setIsCheckingOut(true);
+    if (!isRetry) {
+      setCheckoutError(null);
+    }
+
+    // Keep the same idempotency key across retries of this attempt so the
+    // server recognizes a "Coba Lagi" tap as the same sale, not a new one.
+    if (!isRetry || !checkoutIdempotencyKeyRef.current) {
+      checkoutIdempotencyKeyRef.current = crypto.randomUUID();
+    }
 
     const customer = selectedCustomer;
     if (!customer) {
@@ -403,7 +462,12 @@ export default function POS({
     };
 
     try {
-      const createdId = await onAddTransaction(txData, invoiceDiscountValue, invoiceDiscountType);
+      const createdId = await onAddTransaction(
+        txData,
+        invoiceDiscountValue,
+        invoiceDiscountType,
+        checkoutIdempotencyKeyRef.current
+      );
 
       // Save temporary details for the receipt invoice layout, using the
       // real, persisted transaction id returned by the server.
@@ -418,13 +482,31 @@ export default function POS({
       setInvoiceDiscountValue(0);
       setInvoiceDiscountType('flat');
       setShowInvoice(true);
+      setCheckoutError(null);
+      checkoutIdempotencyKeyRef.current = null;
     } catch (err) {
       console.error('Checkout failed:', err);
-      alert(err instanceof Error ? err.message : 'Checkout gagal. Silakan coba lagi.');
+      // A friendlier, non-blocking message instead of a raw Mongoose/network
+      // error in a browser alert(). The idempotency key above means it's
+      // safe for the cashier to tap "Coba Lagi" - even if the original
+      // request actually reached the server, the retry will be recognized
+      // as the same sale and simply return the existing transaction rather
+      // than creating a duplicate.
+      setCheckoutError(
+        'Checkout tidak berhasil diproses. Ini biasanya karena koneksi jaringan sempat terputus - data penjualan kemungkinan besar belum tersimpan. Silakan coba lagi.'
+      );
     } finally {
       setIsCheckingOut(false);
     }
   };
+
+  // If the cashier edits the cart after a failed checkout (rather than
+  // just retrying as-is), this is a genuinely different sale - drop the
+  // old idempotency key so it isn't reused for different cart contents.
+  useEffect(() => {
+    checkoutIdempotencyKeyRef.current = null;
+    setCheckoutError(null);
+  }, [cart]);
 
   const handleCreateCustomerSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -868,8 +950,21 @@ export default function POS({
               </div>
             </div>
 
+            {checkoutError && (
+              <div className="mb-3 p-3 rounded-xl bg-rose-950/40 border border-rose-800/60 text-rose-200 text-xs space-y-2">
+                <p>{checkoutError}</p>
+                <button
+                  onClick={() => handleCheckout(true)}
+                  disabled={isCheckingOut}
+                  className="w-full font-bold text-xs py-2 rounded-lg bg-rose-800/60 hover:bg-rose-700/60 text-white transition-colors cursor-pointer touch-manipulation disabled:opacity-50"
+                >
+                  {isCheckingOut ? 'Mencoba lagi...' : 'Coba Lagi'}
+                </button>
+              </div>
+            )}
+
             <button
-              onClick={handleCheckout}
+              onClick={() => handleCheckout(false)}
               disabled={cart.length === 0 || isCheckingOut}
               className={`w-full font-bold text-xs py-4 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer touch-manipulation ${
                 cart.length > 0 && !isCheckingOut

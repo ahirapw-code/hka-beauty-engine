@@ -36,4 +36,10 @@ const AttendanceSchema = new Schema<IAttendance>(
 
 withId(AttendanceSchema);
 
+// Payroll (calculateStaffAttendance / getPayrollPreview) always queries by
+// a specific userId plus a date range for the selected month - this
+// compound index makes that a targeted lookup instead of a collection
+// scan as attendance history grows.
+AttendanceSchema.index({ userId: 1, date: 1 });
+
 export default models.Attendance || model<IAttendance>("Attendance", AttendanceSchema, "attendance");

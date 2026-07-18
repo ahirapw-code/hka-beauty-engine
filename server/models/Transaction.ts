@@ -70,4 +70,10 @@ const TransactionSchema = new Schema<ITransaction>(
 
 withId(TransactionSchema);
 
+// Payroll (calculateTherapistPayrollForPeriod / getPayrollPreview) and
+// branch-level reporting always query by branch plus a date range - this
+// compound index makes that a targeted lookup instead of a collection
+// scan as transaction volume grows.
+TransactionSchema.index({ branch: 1, date: 1 });
+
 export default models.Transaction || model<ITransaction>("Transaction", TransactionSchema, "transactions");

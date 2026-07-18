@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import mongoose from "mongoose";
 import crypto from "crypto";
 import { verifyUserToken } from "../middleware/auth.js";
+import { withDbRetry } from "../config/db.js";
 import User from "../models/User.js";
 import Product from "../models/Product.js";
 import Service from "../models/Service.js";
@@ -88,8 +89,15 @@ export async function processCheckout(req: Request, res: Response) {
       return res.status(401).json({ error: "Unauthorized: Invalid auth token." });
     }
 
-    // Fetch caller's actual role and branch to verify permissions
-    const userData = await User.findById(caller.uid);
+    // Fetch caller's actual role and branch to verify permissions.
+    // Wrapped in withDbRetry: this is usually the very first DB query hit
+    // on a checkout request, so it's the query most likely to land on a
+    // serverless instance whose connection went stale while idle. Rather
+    // than letting a stale/zombie connection buffer this query for 10s
+    // and then fail with a confusing internal Mongoose error, this forces
+    // a fresh reconnect and retries once, transparently, before the
+    // cashier ever sees anything.
+    const userData = await withDbRetry(() => User.findById(caller.uid));
     if (!userData) {
       return res.status(403).json({ error: "Forbidden: User profile not found." });
     }

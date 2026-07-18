@@ -227,16 +227,20 @@ export async function addTransaction(
   products: Product[],
   therapists: Therapist[],
   invoiceDiscountValue: number = 0,
-  invoiceDiscountType: 'percent' | 'flat' = 'flat'
+  invoiceDiscountType: 'percent' | 'flat' = 'flat',
+  // Callers that want a *safe-to-retry* checkout (e.g. a cashier tapping
+  // "Coba Lagi" after a network hiccup, per the UX fix in POS.tsx) should
+  // generate this once for a given cart/sale and pass the *same* value on
+  // every retry attempt, so the server's idempotency check recognizes the
+  // retry as the same sale instead of creating a duplicate transaction.
+  // If omitted, a fresh key is generated here (previous behavior) - fine
+  // for one-shot, non-retried calls like the booking auto-checkout path.
+  idempotencyKey: string = crypto.randomUUID()
 ): Promise<string> {
   const txPath = `transactions/${transaction.id}`;
 
   try {
     const idToken = await auth.currentUser?.getIdToken();
-    // Generated once per checkout attempt so a network-level retry of this
-    // exact request is recognized as a duplicate by the server instead of
-    // being processed twice.
-    const idempotencyKey = crypto.randomUUID();
 
     const response = await fetch('/api/processCheckout', {
       method: 'POST',
