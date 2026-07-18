@@ -54,7 +54,7 @@ type Row = Record<string, any>;
  * a plain Sheets-content sync silently overwrite them would both fight
  * those flows and let a payroll change land with no audit trail.
  */
-const AUDIT_OWNED_FIELDS: Record<string, string[]> = {
+export const AUDIT_OWNED_FIELDS: Record<string, string[]> = {
   therapists: ["commissionRate", "baseSalary", "currentSales", "totalCommissionEarned"],
 };
 
@@ -64,7 +64,7 @@ const AUDIT_OWNED_FIELDS: Record<string, string[]> = {
  * ("$foo") and dotted paths ("a.b"), which could target a nested field the
  * writer shouldn't reach. Sheets column headers never produce either.
  */
-function sanitizeFields(fields: Row, ownedElsewhere: string[] | undefined): Row {
+export function sanitizeFields(fields: Row, ownedElsewhere: string[] | undefined): Row {
   const clean: Row = {};
   for (const [key, value] of Object.entries(fields)) {
     if (key.startsWith("$") || key.includes(".")) continue;
@@ -74,7 +74,7 @@ function sanitizeFields(fields: Row, ownedElsewhere: string[] | undefined): Row 
   return clean;
 }
 
-async function upsertRows(model: any, rows: Row[] | undefined, collectionName: string) {
+export async function upsertRows(model: any, rows: Row[] | undefined, collectionName: string) {
   if (!Array.isArray(rows) || rows.length === 0) return 0;
 
   const ops = rows
@@ -110,10 +110,89 @@ async function upsertRows(model: any, rows: Row[] | undefined, collectionName: s
   return (result.upsertedCount || 0) + (result.modifiedCount || 0);
 }
 
-async function deleteRows(model: any, ids: string[] | undefined) {
+export async function deleteRows(model: any, ids: string[] | undefined) {
   if (!Array.isArray(ids) || ids.length === 0) return 0;
   const result = await model.deleteMany({ _id: { $in: ids } });
   return result.deletedCount || 0;
+}
+
+export interface SheetsSyncPayload {
+  customers?: Row[];
+  bookings?: Row[];
+  transactions?: Row[];
+  therapists?: Row[];
+  products?: Row[];
+  services?: Row[];
+  expenses?: Row[];
+  attendance?: Row[];
+  deletedIds?: Record<string, string[] | undefined>;
+}
+
+/**
+ * The actual write-to-MongoDB step, with no HTTP/auth concerns of its own -
+ * both persistSheetsSync (browser-triggered, HKA_MANAGEMENT/SALON_MANAGER
+ * only) and cronSyncSheets (server-triggered on a schedule, so a backup
+ * still lands even on a day only therapists/cashiers logged in) call this
+ * exact same audited path. Keeping one implementation means AUDIT_OWNED_FIELDS
+ * and sanitizeFields protections can't drift between the two callers.
+ */
+export async function persistSheetsData(payload: SheetsSyncPayload) {
+  const { customers, bookings, transactions, therapists, products, services, expenses, attendance, deletedIds } =
+    payload || {};
+
+  const [
+    customersWritten, bookingsWritten, transactionsWritten, therapistsWritten,
+    productsWritten, servicesWritten, expensesWritten, attendanceWritten,
+  ] = await Promise.all([
+    upsertRows(Customer, customers, "customers"),
+    upsertRows(Booking, bookings, "bookings"),
+    upsertRows(Transaction, transactions, "transactions"),
+    upsertRows(Therapist, therapists, "therapists"),
+    upsertRows(Product, products, "products"),
+    upsertRows(Service, services, "services"),
+    upsertRows(Expense, expenses, "expenses"),
+    upsertRows(Attendance, attendance, "attendance"),
+  ]);
+  const written = {
+    customers: customersWritten,
+    bookings: bookingsWritten,
+    transactions: transactionsWritten,
+    therapists: therapistsWritten,
+    products: productsWritten,
+    services: servicesWritten,
+    expenses: expensesWritten,
+    attendance: attendanceWritten,
+  };
+
+  // Rows that were genuinely removed from the Sheet (not just missing due
+  // to a bad/partial read - see the headers-length guard in
+  // syncStateToSpreadsheetIncremental) get deleted from MongoDB too,
+  // otherwise a deletion in the Sheet would never actually stick.
+  const [
+    customersDeleted, bookingsDeleted, transactionsDeleted, therapistsDeleted,
+    productsDeleted, servicesDeleted, expensesDeleted, attendanceDeleted,
+  ] = await Promise.all([
+    deleteRows(Customer, deletedIds?.Customers),
+    deleteRows(Booking, deletedIds?.Bookings),
+    deleteRows(Transaction, deletedIds?.Transactions),
+    deleteRows(Therapist, deletedIds?.Therapists),
+    deleteRows(Product, deletedIds?.Products),
+    deleteRows(Service, deletedIds?.Services),
+    deleteRows(Expense, deletedIds?.Expenses),
+    deleteRows(Attendance, deletedIds?.Attendance),
+  ]);
+  const deleted = {
+    customers: customersDeleted,
+    bookings: bookingsDeleted,
+    transactions: transactionsDeleted,
+    therapists: therapistsDeleted,
+    products: productsDeleted,
+    services: servicesDeleted,
+    expenses: expensesDeleted,
+    attendance: attendanceDeleted,
+  };
+
+  return { written, deleted };
 }
 
 export async function persistSheetsSync(req: Request, res: Response) {
@@ -126,76 +205,21 @@ export async function persistSheetsSync(req: Request, res: Response) {
     if (!userData) {
       return res.status(403).json({ error: "Forbidden: user profile not found." });
     }
-    // SECURITY: this endpoint bulk-writes 8 core business collections
-    // straight to MongoDB with $set on whatever fields the caller sends, so
-    // it must be restricted the same way every other write path to these
-    // collections is (see authorize.ts POLICIES) - management only. This
-    // also matches what the frontend itself already documents
-    // (src/lib/sheetsPersist.ts: "Management-only on the server side").
-    // A non-management caller's background sync will simply fail to
-    // persist to the DB here (already handled as a non-fatal, logged
-    // conflict by GoogleSheetsSync.tsx), not crash the app.
-    if (userData.role !== "HKA_MANAGEMENT" && userData.role !== "SALON_MANAGER") {
-      return res.status(403).json({
-        error: "Forbidden: hanya HKA_MANAGEMENT atau SALON_MANAGER yang diizinkan menyimpan hasil sync Google Sheets.",
-      });
-    }
+    // Any authenticated staff (HKA_MANAGEMENT, SALON_MANAGER, THERAPIST, ...)
+    // can trigger this now - opened up deliberately so a Sheets edit still
+    // gets durably saved to MongoDB even on a day only therapists/cashiers
+    // are logged in, instead of silently reverting on refresh.
+    //
+    // This is safe to open regardless of role because payroll-sensitive
+    // fields (commissionRate, baseSalary, currentSales, totalCommissionEarned)
+    // are stripped by sanitizeFields/AUDIT_OWNED_FIELDS below no matter who
+    // the caller is - a THERAPIST session persisting a sync can't touch
+    // those fields any more than a manager's accidental Sheets edit could.
+    // Payroll changes still only ever flow through the dedicated, audited
+    // /api/syncSheetsToFirestore path (HKA_MANAGEMENT only, with a
+    // PayrollAuditLog entry per change).
 
-    const { customers, bookings, transactions, therapists, products, services, expenses, attendance, deletedIds } =
-      req.body || {};
-
-    const [
-      customersWritten, bookingsWritten, transactionsWritten, therapistsWritten,
-      productsWritten, servicesWritten, expensesWritten, attendanceWritten,
-    ] = await Promise.all([
-      upsertRows(Customer, customers, "customers"),
-      upsertRows(Booking, bookings, "bookings"),
-      upsertRows(Transaction, transactions, "transactions"),
-      upsertRows(Therapist, therapists, "therapists"),
-      upsertRows(Product, products, "products"),
-      upsertRows(Service, services, "services"),
-      upsertRows(Expense, expenses, "expenses"),
-      upsertRows(Attendance, attendance, "attendance"),
-    ]);
-    const written = {
-      customers: customersWritten,
-      bookings: bookingsWritten,
-      transactions: transactionsWritten,
-      therapists: therapistsWritten,
-      products: productsWritten,
-      services: servicesWritten,
-      expenses: expensesWritten,
-      attendance: attendanceWritten,
-    };
-
-    // Rows that were genuinely removed from the Sheet (not just missing due
-    // to a bad/partial read - see the headers-length guard in
-    // syncStateToSpreadsheetIncremental) get deleted from MongoDB too,
-    // otherwise a deletion in the Sheet would never actually stick.
-    const [
-      customersDeleted, bookingsDeleted, transactionsDeleted, therapistsDeleted,
-      productsDeleted, servicesDeleted, expensesDeleted, attendanceDeleted,
-    ] = await Promise.all([
-      deleteRows(Customer, deletedIds?.Customers),
-      deleteRows(Booking, deletedIds?.Bookings),
-      deleteRows(Transaction, deletedIds?.Transactions),
-      deleteRows(Therapist, deletedIds?.Therapists),
-      deleteRows(Product, deletedIds?.Products),
-      deleteRows(Service, deletedIds?.Services),
-      deleteRows(Expense, deletedIds?.Expenses),
-      deleteRows(Attendance, deletedIds?.Attendance),
-    ]);
-    const deleted = {
-      customers: customersDeleted,
-      bookings: bookingsDeleted,
-      transactions: transactionsDeleted,
-      therapists: therapistsDeleted,
-      products: productsDeleted,
-      services: servicesDeleted,
-      expenses: expensesDeleted,
-      attendance: attendanceDeleted,
-    };
-
+    const { written, deleted } = await persistSheetsData(req.body || {});
     return res.status(200).json({ success: true, written, deleted });
   } catch (err: any) {
     console.error("Error in persistSheetsSync:", err);
