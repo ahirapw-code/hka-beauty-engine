@@ -614,6 +614,7 @@ export default function App() {
             transactions={transactions}
             bookings={bookings}
             therapists={therapists}
+            users={usersList}
             products={products}
             onUpdateBookingStatus={handleUpdateBookingStatus}
           />
