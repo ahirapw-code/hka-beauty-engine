@@ -112,7 +112,7 @@ export default function Sidebar({
     { id: 'my-payroll', label: 'Slip Gaji Saya', icon: Wallet, roles: ['SALON_MANAGER', 'THERAPIST'] },
     { id: 'branch-settings', label: 'Pengaturan Cabang', icon: Sliders, roles: ['HKA_MANAGEMENT'] },
     { id: 'therapist-target', label: 'My Target', icon: Target, roles: ['THERAPIST'] },
-    { id: 'attendance-terminal', label: 'Attendance Terminal', icon: Clock, roles: ['THERAPIST'] },
+    { id: 'attendance-terminal', label: 'Attendance Terminal', icon: Clock, roles: ['SALON_MANAGER', 'THERAPIST'] },
   ];
 
   const allowedMenuItems = menuItems.filter(item => item.roles.includes(user.role));
