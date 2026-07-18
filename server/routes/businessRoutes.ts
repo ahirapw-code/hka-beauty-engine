@@ -5,6 +5,7 @@ import { resetStaffPassword } from "../controllers/resetPasswordController.js";
 import { syncSheetsToFirestore, adjustTherapistCommission } from "../controllers/googleSheetsController.js";
 import { persistSheetsSync } from "../controllers/sheetsPersistController.js";
 import { createBooking, createExpense, createPayrollRun, updateBookingStatus, activateMembership, createTherapist, createCustomer } from "../controllers/recordsController.js";
+import { getPayrollPreview } from "../controllers/payrollController.js";
 import { requireAuthWithProfile } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
 import { checkoutBodySchema, clockInOutBodySchema, bookingCreateSchema, bookingStatusUpdateSchema, therapistCreateSchema, therapistCommissionAdjustmentSchema, customerCreateSchema } from "../validation/schemas.js";
@@ -27,6 +28,7 @@ router.patch(
   adjustTherapistCommission
 );
 router.post("/expenses", createExpense);
+router.get("/payroll/preview", requireAuthWithProfile, getPayrollPreview);
 router.post("/payroll/run", createPayrollRun);
 
 router.post("/sheets/persist", requireAuthWithProfile, persistSheetsSync);
