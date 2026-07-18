@@ -70,6 +70,25 @@ export default function Bookings({
   onUpdateBookingStatus
 }: BookingsProps) {
   const isTherapist = user.role === 'THERAPIST';
+  // SALON_MANAGER accounts are now auto-surfaced as assignable therapists
+  // (see branchTherapists below, mirroring POS.tsx) - so a manager can have
+  // their own bookings just like a real therapist, on top of needing the
+  // full cross-branch agenda for their oversight role. Give them a toggle
+  // to switch between the two instead of only ever seeing everyone's
+  // bookings with no way to isolate their own schedule.
+  const isManager = user.role === 'SALON_MANAGER';
+  const [showMineOnly, setShowMineOnly] = useState(false);
+
+  // A manager's "own" therapist identity: if they already have a real,
+  // linked Therapist record (dual-role staff who also perform services),
+  // that record's id is what bookings reference. Otherwise it's the
+  // synthetic id used for them everywhere else in this file (== their
+  // user id - see branchTherapists below).
+  const myTherapistId = useMemo(() => {
+    if (!isManager) return null;
+    const linked = therapists.find(t => t.linkedUserId === user.id);
+    return linked ? linked.id : user.id;
+  }, [isManager, therapists, user.id]);
 
   // State for Booking Creator Drawer
   const [showAddBooking, setShowAddBooking] = useState(false);
@@ -99,8 +118,11 @@ export default function Bookings({
     } else if (activeBranchFilter !== 'ALL') {
       list = list.filter(b => b.branch === activeBranchFilter);
     }
+    if (isManager && showMineOnly && myTherapistId) {
+      list = list.filter(b => b.therapistId === myTherapistId);
+    }
     return list.sort((a, b) => (a.date + ' ' + a.time).localeCompare(b.date + ' ' + b.time));
-  }, [bookings, isTherapist, activeBranchFilter, therapists, user.name]);
+  }, [bookings, isTherapist, activeBranchFilter, therapists, user.name, isManager, showMineOnly, myTherapistId]);
 
   // Dynamic values based on selected booking branch in form
   const branchTreatments = useMemo(() => {
@@ -307,20 +329,39 @@ export default function Bookings({
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
           <div>
             <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider font-mono">
-              {isTherapist ? 'My Appointments Sheet' : 'Cross-Branch Bookings Agenda'}
+              {isTherapist || (isManager && showMineOnly) ? 'My Appointments Sheet' : 'Cross-Branch Bookings Agenda'}
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">Track Checked-In statuses, therapist occupancy, and upcoming guest arrivals.</p>
           </div>
 
-          {!isTherapist && (
-            <button
-              onClick={() => setShowAddBooking(true)}
-              className="px-4 py-2 bg-[#1a1c1e] hover:bg-slate-800 text-white font-bold text-xs rounded-xl flex items-center gap-2 transition-all cursor-pointer shadow-sm self-start"
-            >
-              <Plus className="w-4 h-4 text-[#D4AF37]" />
-              <span>Schedule Booking</span>
-            </button>
-          )}
+          <div className="flex items-center gap-2 self-start">
+            {isManager && (
+              <div className="flex items-center bg-slate-100 rounded-xl p-1 text-xs font-bold">
+                <button
+                  onClick={() => setShowMineOnly(false)}
+                  className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${!showMineOnly ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-400'}`}
+                >
+                  Semua Booking
+                </button>
+                <button
+                  onClick={() => setShowMineOnly(true)}
+                  className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${showMineOnly ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-400'}`}
+                >
+                  Booking Saya
+                </button>
+              </div>
+            )}
+
+            {!isTherapist && (
+              <button
+                onClick={() => setShowAddBooking(true)}
+                className="px-4 py-2 bg-[#1a1c1e] hover:bg-slate-800 text-white font-bold text-xs rounded-xl flex items-center gap-2 transition-all cursor-pointer shadow-sm"
+              >
+                <Plus className="w-4 h-4 text-[#D4AF37]" />
+                <span>Schedule Booking</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {generalError && (
