@@ -90,6 +90,65 @@ function diffNonNegativeField(
 }
 
 /**
+ * PATCH /api/therapists/:id/commission-adjustment
+ *
+ * The one deliberate, audited exception to `totalCommissionEarned` being
+ * write-locked (see AUDIT_OWNED_FIELDS in sheetsPersistController.ts and
+ * PROTECTED_FIELDS in middleware/authorize.ts). That field is normally only
+ * ever incremented by processCheckout as sales happen - editing it in the
+ * connected Google Sheet is a no-op by design (the sync silently drops it),
+ * which previously left no way to correct it at all (e.g. after a payroll
+ * payout, or to fix a bad accrual) without going around the API straight
+ * into Mongo. This gives HKA_MANAGEMENT a real, audited path instead:
+ * every change is logged to PayrollAuditLog with the old/new value, same
+ * as commissionRate/baseSalary changes from the Sheets sync.
+ */
+export async function adjustTherapistCommission(req: Request, res: Response) {
+  try {
+    const caller = await verifyUserToken(req.headers.authorization);
+    if (!caller) {
+      return res.status(401).json({ error: "Unauthorized: Invalid auth token." });
+    }
+    const userData = await User.findById(caller.uid);
+    if (!userData || userData.role !== "HKA_MANAGEMENT") {
+      return res.status(403).json({
+        error: "Forbidden: Hanya HKA_MANAGEMENT yang diizinkan menyesuaikan totalCommissionEarned.",
+      });
+    }
+
+    const { id } = req.params;
+    const { newValue, reason } = req.body as { newValue: number; reason?: string };
+
+    const therapist = await Therapist.findById(id);
+    if (!therapist) {
+      return res.status(404).json({ error: `Therapist ${id} tidak ditemukan.` });
+    }
+
+    const oldValue = therapist.totalCommissionEarned ?? 0;
+    if (oldValue === newValue) {
+      return res.status(200).json({ success: true, unchanged: true, data: therapist.toJSON() });
+    }
+
+    await Therapist.updateOne({ _id: id }, { $set: { totalCommissionEarned: newValue } });
+    await PayrollAuditLog.create({
+      therapistId: id,
+      staffType: "therapist",
+      field: "totalCommissionEarned",
+      oldValue,
+      newValue,
+      source: reason ? `manual_adjustment: ${reason}` : "manual_adjustment",
+      timestamp: new Date().toISOString(),
+    });
+
+    const updated = await Therapist.findById(id);
+    return res.status(200).json({ success: true, data: updated?.toJSON() });
+  } catch (err: any) {
+    console.error("Error in adjustTherapistCommission:", err);
+    return res.status(500).json({ error: err.message || "Failed to adjust commission." });
+  }
+}
+
+/**
  * POST /api/syncSheetsToFirestore
  * Endpoint path kept unchanged for frontend compatibility even though the
  * datastore is now MongoDB. Direct Mongoose port of the original logic.

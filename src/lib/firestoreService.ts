@@ -163,6 +163,40 @@ export async function addTherapist(therapist: {
   }
 }
 
+// Manually corrects a therapist's totalCommissionEarned (e.g. resetting it
+// after a payroll payout, or fixing a bad accrual). This field is normally
+// write-locked and only ever incremented by processCheckout as sales
+// happen - editing it in the connected Google Sheet is intentionally a
+// no-op (see server/controllers/sheetsPersistController.ts), so this is the
+// one real, audited path for a manual correction (HKA_MANAGEMENT only; see
+// server/controllers/googleSheetsController.ts::adjustTherapistCommission).
+export async function adjustTherapistCommission(
+  therapistId: string,
+  newValue: number,
+  reason?: string
+): Promise<Therapist> {
+  const path = `therapists/${therapistId}`;
+  try {
+    const idToken = await auth.currentUser?.getIdToken();
+    const response = await fetch(`/api/therapists/${therapistId}/commission-adjustment`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {})
+      },
+      body: JSON.stringify({ newValue, ...(reason ? { reason } : {}) })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || `Failed to adjust commission (status ${response.status})`);
+    }
+    return data.data as Therapist;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+    throw error;
+  }
+}
+
 // 2. ADD BOOKING
 export async function addBooking(booking: Booking): Promise<Booking> {
   const path = `bookings/${booking.id}`;

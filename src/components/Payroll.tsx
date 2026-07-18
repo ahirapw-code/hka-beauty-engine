@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { User, Branch, Therapist, Payroll } from '../types';
 import { db, auth } from '../lib/firebase';
 import { doc, setDoc, updateDoc, deleteDoc } from '../lib/firestoreClient';
+import { adjustTherapistCommission } from '../lib/firestoreService';
 import { formatIDR } from '../utils';
 import { 
   Coins, 
@@ -18,7 +19,8 @@ import {
   Minus, 
   Save, 
   Loader2, 
-  ShieldAlert 
+  ShieldAlert,
+  Pencil
 } from 'lucide-react';
 
 interface PayrollProps {
@@ -173,6 +175,41 @@ export default function PayrollComponent({ user, selectedBranch: initialBranch }
         [field]: Math.max(0, value)
       }
     }));
+  };
+
+  // Manually corrects a therapist's accumulated totalCommissionEarned (the
+  // figure shown on the Dashboard's "Therapist Performance & Commissions"
+  // card). That field is only ever auto-incremented by checkout - it can't
+  // be fixed via the Sheet (edits there are a no-op by design), so this is
+  // the one audited path for a correction, e.g. resetting it to 0 after a
+  // payout. HKA_MANAGEMENT only; every change is logged server-side.
+  const handleAdjustTotalCommission = async (therapist: Therapist) => {
+    const currentValue = therapist.totalCommissionEarned || 0;
+    const input = window.prompt(
+      `Ubah total komisi terkumpul untuk ${therapist.name}.\nNilai saat ini: ${formatIDR(currentValue)}\n\nMasukkan nilai baru (Rp):`,
+      String(currentValue)
+    );
+    if (input === null) return; // cancelled
+
+    const newValue = Number(input);
+    if (isNaN(newValue) || newValue < 0) {
+      alert('Nilai tidak valid. Masukkan angka non-negatif.');
+      return;
+    }
+    if (newValue === currentValue) return;
+
+    const reason = window.prompt('Alasan penyesuaian (opsional, untuk log audit):') || undefined;
+
+    setIsActionLoading(`adjust_commission_${therapist.id}`);
+    try {
+      const updated = await adjustTherapistCommission(therapist.id, newValue, reason);
+      setTherapists(prev => prev.map(t => (t.id === therapist.id ? { ...t, ...updated } : t)));
+    } catch (err: any) {
+      console.error('Error adjusting total commission:', err);
+      alert('Gagal menyesuaikan komisi: ' + (err.message || String(err)));
+    } finally {
+      setIsActionLoading(null);
+    }
   };
 
   // Generate a draft payroll document in Firestore
@@ -504,6 +541,26 @@ export default function PayrollComponent({ user, selectedBranch: initialBranch }
                         <td className="p-4 pl-6">
                           <div className="font-bold text-slate-900">{therapist.name}</div>
                           <div className="text-[10px] text-slate-400 font-mono mt-0.5">ID: {therapist.id} • Komisi: {(therapist.commissionRate * 100).toFixed(0)}% • Harian: {formatIDR(therapist.baseSalary || 0)}</div>
+                          {isHKA && (
+                            <div className="flex items-center gap-1.5 mt-1">
+                              <span className="text-[9px] text-slate-400 font-mono">
+                                Total Komisi Terkumpul: {formatIDR(therapist.totalCommissionEarned || 0)}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleAdjustTotalCommission(therapist)}
+                                disabled={isActionLoading === `adjust_commission_${therapist.id}`}
+                                title="Sesuaikan total komisi terkumpul (audited)"
+                                className="text-slate-400 hover:text-slate-700 disabled:opacity-50"
+                              >
+                                {isActionLoading === `adjust_commission_${therapist.id}` ? (
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                ) : (
+                                  <Pencil className="w-3 h-3" />
+                                )}
+                              </button>
+                            </div>
+                          )}
                         </td>
 
                         {/* Attendance */}

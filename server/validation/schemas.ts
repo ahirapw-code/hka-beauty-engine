@@ -192,6 +192,20 @@ export const therapistCreateSchema = z.object({
   linkedUserId: z.string().optional(),
 });
 
+/**
+ * Used by PATCH /api/therapists/:id/commission-adjustment (see
+ * googleSheetsController.ts::adjustTherapistCommission). `totalCommissionEarned`
+ * is otherwise write-locked (owned by processCheckout's accrual logic) -
+ * this is the one deliberate, audited exception for manual corrections
+ * (e.g. resetting after a payout, fixing a bad accrual), so the new value
+ * must be an explicit non-negative number, not something inferred from a
+ * blank/missing field.
+ */
+export const therapistCommissionAdjustmentSchema = z.object({
+  newValue: z.number().finite().min(0, "newValue must be a non-negative number."),
+  reason: z.string().trim().min(1).max(500).optional(),
+});
+
 /* ------------------------------------------------------------------ */
 /* Product (collection: "products")                                     */
 /* ------------------------------------------------------------------ */
