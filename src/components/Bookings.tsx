@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { User, Branch, Booking, Customer, Service, Therapist } from '../types';
 import { formatIDR } from '../utils';
 import { Calendar, Plus, Clock, UserCheck, ShieldAlert, CheckCircle, Trash2, CheckCircle2 } from 'lucide-react';
@@ -154,10 +154,25 @@ export default function Bookings({
     return customers.filter(c => c.preferredBranch === bookingBranch);
   }, [customers, bookingBranch]);
 
-  // Set default selects when form branch swaps
-  useMemo(() => {
-    if (branchTreatments.length > 0) setSelectedTreatmentId(branchTreatments[0].id);
-    if (branchTherapists.length > 0) setSelectedTherapistId(branchTherapists[0].id);
+  // Set default selects when the branch swaps (or the list first loads) -
+  // but NOT on every background re-poll. `branchTherapists`/`branchTreatments`
+  // get a brand new array reference every ~4s because App.tsx's onSnapshot
+  // poller re-fetches `therapists` on an interval even when nothing
+  // changed. This used to be a `useMemo` that unconditionally called
+  // setSelectedTherapistId(branchTherapists[0].id) whenever that reference
+  // changed - so picking "Gizel" in the dropdown got silently stomped back
+  // to whichever therapist happens to be first in the list (e.g. "Caca")
+  // within a few seconds, before the person even finished filling the
+  // form. Guarding on "is the current selection still valid" means a
+  // real, still-present selection is left alone; only a selection that's
+  // actually gone (branch swapped, or nothing picked yet) gets defaulted.
+  useEffect(() => {
+    if (branchTreatments.length > 0 && !branchTreatments.some(t => t.id === selectedTreatmentId)) {
+      setSelectedTreatmentId(branchTreatments[0].id);
+    }
+    if (branchTherapists.length > 0 && !branchTherapists.some(t => t.id === selectedTherapistId)) {
+      setSelectedTherapistId(branchTherapists[0].id);
+    }
     if (!branchCustomers.some(c => c.id === selectedCustomerId)) {
       setSelectedCustomerId(branchCustomers[0]?.id || '');
     }
