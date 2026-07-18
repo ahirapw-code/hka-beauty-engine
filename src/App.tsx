@@ -642,6 +642,7 @@ export default function App() {
             customers={customers}
             services={services}
             therapists={therapists}
+            users={usersList}
             onAddBooking={handleAddBooking}
             onUpdateBookingStatus={handleUpdateBookingStatus}
           />
