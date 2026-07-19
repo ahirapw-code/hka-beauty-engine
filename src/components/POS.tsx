@@ -485,14 +485,22 @@ export default function POS({
       checkoutIdempotencyKeyRef.current = null;
     } catch (err) {
       console.error('Checkout failed:', err);
-      // A friendlier, non-blocking message instead of a raw Mongoose/network
-      // error in a browser alert(). The idempotency key above means it's
-      // safe for the cashier to tap "Coba Lagi" - even if the original
-      // request actually reached the server, the retry will be recognized
-      // as the same sale and simply return the existing transaction rather
-      // than creating a duplicate.
+      // Prefer the server's actual reason (e.g. a permissions error, or a
+      // validation error on the cart) when we have one - it's usually
+      // specific and actionable. Only fall back to the generic
+      // network-blip message for genuine network-layer failures (fetch
+      // throwing before any response came back at all), where there's no
+      // server message to show. The idempotency key above means it's safe
+      // for the cashier to tap "Coba Lagi" either way - even if the
+      // original request actually reached the server, the retry will be
+      // recognized as the same sale and simply return the existing
+      // transaction rather than creating a duplicate.
+      const serverMessage = err instanceof Error ? err.message : null;
+      const isGenuineNetworkFailure = err instanceof TypeError; // fetch's own throw shape when it never got a response
       setCheckoutError(
-        'Checkout tidak berhasil diproses. Ini biasanya karena koneksi jaringan sempat terputus - data penjualan kemungkinan besar belum tersimpan. Silakan coba lagi.'
+        serverMessage && !isGenuineNetworkFailure
+          ? serverMessage
+          : 'Checkout tidak berhasil diproses. Ini biasanya karena koneksi jaringan sempat terputus - data penjualan kemungkinan besar belum tersimpan. Silakan coba lagi.'
       );
     } finally {
       setIsCheckingOut(false);
