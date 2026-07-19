@@ -65,6 +65,31 @@ export default function TherapistTarget({
     return salesList;
   }, [transactions, therapist]);
 
+  // "This month's" sales, computed live from the transactions this
+  // component already has - deliberately NOT therapist.currentSales, which
+  // is a lifetime cumulative total kept in permanent lockstep with the
+  // Google Sheet (see server/controllers/sheetsPersistController.ts /
+  // googleSheetsController.ts) and is never reset. This sums exactly the
+  // same way checkoutController.ts adds to currentSales at checkout time
+  // (price * quantity per item, matched to this therapist), scoped to the
+  // current calendar month. It rolls over automatically at the start of
+  // every month with nothing to schedule, store, or reset - and it can
+  // never "rebound", since it isn't a counter that gets written anywhere.
+  const currentSales = useMemo(() => {
+    if (!therapist) return 0;
+    const currentMonthPrefix = new Date().toISOString().slice(0, 7); // "YYYY-MM"
+    let total = 0;
+    for (const tx of transactions) {
+      if (!tx.date.startsWith(currentMonthPrefix)) continue;
+      for (const item of tx.items) {
+        if (item.type === 'service' && item.therapistId === therapist.id) {
+          total += item.price * item.quantity;
+        }
+      }
+    }
+    return total;
+  }, [transactions, therapist]);
+
   if (!therapist) {
     return (
       <div className="bg-white rounded-3xl border border-slate-100 p-8 shadow-sm text-center max-w-lg mx-auto my-12 space-y-4">
@@ -83,8 +108,6 @@ export default function TherapistTarget({
     );
   }
 
-  // Calculate percentage progress toward target
-  const currentSales = therapist.currentSales || 0;
   const monthlyTarget = therapist.monthlyTarget || 5000;
   const progressPercent = Math.min(100, Math.round((currentSales / monthlyTarget) * 100));
   const remainingSales = Math.max(0, monthlyTarget - currentSales);
@@ -117,7 +140,7 @@ export default function TherapistTarget({
 
           <div className="space-y-3">
             <div className="flex justify-between text-xs text-slate-500 font-mono">
-              <span>Current Sales: {formatIDR(currentSales)}</span>
+              <span>Sales This Month: {formatIDR(currentSales)}</span>
               <span>Target: {formatIDR(monthlyTarget)}</span>
             </div>
             
