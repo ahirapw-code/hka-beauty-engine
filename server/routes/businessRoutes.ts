@@ -4,8 +4,6 @@ import { clockInOut } from "../controllers/attendanceController.js";
 import { resetStaffPassword } from "../controllers/resetPasswordController.js";
 import { syncSheetsToFirestore, adjustTherapistCommission } from "../controllers/googleSheetsController.js";
 import { persistSheetsSync } from "../controllers/sheetsPersistController.js";
-import { cronSyncSheets } from "../controllers/sheetsCronController.js";
-import { resetMonthlyTherapistSales } from "../controllers/sheetsResetController.js";
 import { createBooking, createExpense, createPayrollRun, updateBookingStatus, activateMembership, createTherapist, createCustomer } from "../controllers/recordsController.js";
 import { getPayrollPreview } from "../controllers/payrollController.js";
 import { requireAuthWithProfile } from "../middleware/auth.js";
@@ -34,7 +32,5 @@ router.get("/payroll/preview", requireAuthWithProfile, getPayrollPreview);
 router.post("/payroll/run", createPayrollRun);
 
 router.post("/sheets/persist", requireAuthWithProfile, persistSheetsSync);
-router.post("/cron/sync-sheets", cronSyncSheets);
-router.post("/cron/reset-monthly-sales", resetMonthlyTherapistSales);
 
 export default router;

@@ -59,9 +59,7 @@ type Row = Record<string, any>;
  * one again). commissionRate/baseSalary/currentSales/totalCommissionEarned
  * used to be locked here - they no longer are, since the Sheet is now the
  * single source of truth for all Therapist business fields (see the
- * endpoint doc comment above and the monthly reset cron in
- * sheetsCronController.ts, which keeps currentSales's baseline consistent
- * between the Sheet and MongoDB across a payroll cycle).
+ * endpoint doc comment above).
  */
 export const AUDIT_OWNED_FIELDS: Record<string, string[]> = {
   therapists: [],
@@ -139,11 +137,10 @@ export interface SheetsSyncPayload {
 
 /**
  * The actual write-to-MongoDB step, with no HTTP/auth concerns of its own -
- * both persistSheetsSync (browser-triggered, HKA_MANAGEMENT/SALON_MANAGER
- * only) and cronSyncSheets (server-triggered on a schedule, so a backup
- * still lands even on a day only therapists/cashiers logged in) call this
- * exact same audited path. Keeping one implementation means AUDIT_OWNED_FIELDS
- * and sanitizeFields protections can't drift between the two callers.
+ * called by persistSheetsSync below, which any authenticated staff session
+ * can trigger from the app whenever the Sheets sync engine
+ * (syncStateToSpreadsheetIncremental) reconciles a change, whether that
+ * change originated in the app or from a manual edit in the Sheet itself.
  */
 export async function persistSheetsData(payload: SheetsSyncPayload) {
   const { customers, bookings, transactions, therapists, products, services, expenses, attendance, deletedIds } =
