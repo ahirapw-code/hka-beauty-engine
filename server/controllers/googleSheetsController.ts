@@ -92,22 +92,14 @@ function diffNonNegativeField(
 /**
  * PATCH /api/therapists/:id/commission-adjustment
  *
- * One of two deliberate, audited exceptions to `totalCommissionEarned` being
- * write-locked (see AUDIT_OWNED_FIELDS in sheetsPersistController.ts and
- * PROTECTED_FIELDS in middleware/authorize.ts). That field is normally only
- * ever incremented by processCheckout as sales happen - editing it directly
- * through the generic bidirectional Sheets sync is a no-op by design (that
- * sync silently drops it). This endpoint gives HKA_MANAGEMENT a real,
- * audited path for one-off corrections from inside the app itself (e.g.
- * after a payroll payout, or to fix a bad accrual): every change is logged
- * to PayrollAuditLog with the old/new value, same as commissionRate/
- * baseSalary changes from the Sheets sync.
- *
- * The other exception is POST /api/syncSheetsToFirestore below, which reads
- * `totalCommissionEarned` straight from the "Therapists" tab (alongside
- * commissionRate/baseSalary) so it can be corrected from the spreadsheet
- * too - same HKA_MANAGEMENT gate, same audit trail, just triggered from a
- * Sheets edit instead of a click in the app.
+ * A manual, audited one-off correction path for HKA_MANAGEMENT to fix
+ * `totalCommissionEarned` from inside the app itself (e.g. after a payroll
+ * payout). Editing this same field from the connected Google Sheet now also
+ * works and takes priority - it flows through the unified generic sync
+ * (POST /api/sheets/persist, see sheetsPersistController.ts), same as every
+ * other Therapist field. This endpoint stays as the in-app alternative for
+ * when there's no Sheet edit to make; both write to PayrollAuditLog so
+ * there's one combined history regardless of which path was used.
  */
 export async function adjustTherapistCommission(req: Request, res: Response) {
   try {
@@ -157,21 +149,28 @@ export async function adjustTherapistCommission(req: Request, res: Response) {
 /**
  * POST /api/syncSheetsToFirestore
  * Endpoint path kept unchanged for frontend compatibility even though the
- * datastore is now MongoDB. Direct Mongoose port of the original logic.
+ * datastore is now MongoDB.
  *
- * Reads two tabs:
- *  - "Therapists" -> updates Therapist.commissionRate / .baseSalary /
- *    .totalCommissionEarned
- *  - "Managers"   -> updates User.commissionRate / .baseSalary / .monthlyTarget,
- *    but ONLY for documents whose role is already SALON_MANAGER (a row that
- *    doesn't match an existing Salon Manager account - wrong id, therapist
- *    id reused by mistake, etc - is skipped with a warning instead of
- *    silently touching the wrong user).
- * All are payroll-sensitive fields, so all go through this same
- * HKA_MANAGEMENT-only, audited, one-way (sheet -> DB) path rather than the
- * generic bidirectional Sheets sync - identical reasoning for each: comp
- * data must never be silently overwritten by an unrelated Sheets edit
- * without an audit trail.
+ * SCOPE (as of this revision): the "Therapists" tab handling that used to
+ * live here has been removed - commissionRate/baseSalary/currentSales/
+ * totalCommissionEarned now flow through the unified generic sync
+ * (POST /api/sheets/persist), which treats the Sheet as the single source
+ * of truth for every Therapist field. Keeping a second path that wrote the
+ * same fields was exactly the "which system actually owns this" confusion
+ * that caused edits to silently not stick.
+ *
+ * This endpoint now only handles the "Managers" tab -> User.commissionRate /
+ * .baseSalary / .monthlyTarget for SALON_MANAGER accounts, since Users are
+ * intentionally excluded from the generic sync (account/auth fields must
+ * never flow through a generic content sync) and Managers has no other
+ * pipeline into the app. A row that doesn't match an existing Salon
+ * Manager account (wrong id, therapist id reused by mistake, etc) is
+ * skipped with a warning instead of silently touching the wrong user.
+ *
+ * Not role-gated: any authenticated session can trigger it, same as
+ * /api/sheets/persist - the Sheet is the source of truth regardless of who
+ * is logged in when the sync runs. Every change is still recorded to
+ * PayrollAuditLog either way.
  */
 export async function syncSheetsToFirestore(req: Request, res: Response) {
   try {
@@ -185,18 +184,14 @@ export async function syncSheetsToFirestore(req: Request, res: Response) {
     if (!caller) {
       return res.status(401).json({ error: "Unauthorized: Invalid auth token." });
     }
-
     const userData = await User.findById(caller.uid);
-    if (!userData || userData.role !== "HKA_MANAGEMENT") {
-      return res.status(403).json({
-        error: "Forbidden: Hanya HKA_MANAGEMENT yang diizinkan melakukan sinkronisasi payroll dari Google Sheets.",
-      });
+    if (!userData) {
+      return res.status(403).json({ error: "Forbidden: user profile not found." });
     }
 
-    // Fetch both tabs. Missing "Managers" is expected/normal for
+    // Fetch the "Managers" tab. Missing/empty is expected/normal for
     // spreadsheets that haven't added it yet - that's a warning, not a
-    // hard failure, so Therapists sync keeps working either way.
-    let therapistRows: any[][] = [];
+    // hard failure.
     let managerRows: any[][] = [];
     const warnings: string[] = [];
 
@@ -213,7 +208,6 @@ export async function syncSheetsToFirestore(req: Request, res: Response) {
       if (json.status !== "success") {
         throw new Error(json.message || "Apps Script failed to read");
       }
-      therapistRows = json.data?.["Therapists"] || [];
       managerRows = json.data?.["Managers"] || [];
       if (managerRows.length === 0) {
         warnings.push('Tab "Managers" tidak ditemukan atau kosong di Google Sheets - dilewati.');
@@ -222,19 +216,9 @@ export async function syncSheetsToFirestore(req: Request, res: Response) {
       if (!accessToken) {
         return res.status(400).json({ error: "Missing Google access token." });
       }
-      const therapistRes = await fetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Therapists!A1:K`,
-        { headers: { Authorization: `Bearer ${accessToken}` } }
-      );
-      if (!therapistRes.ok) {
-        throw new Error(`Sheets API fetch failed with status ${therapistRes.status}`);
-      }
-      const therapistJson: any = await therapistRes.json();
-      therapistRows = therapistJson.values || [];
-
-      // "Managers" is a newer, optional tab - a 400 here (tab doesn't
-      // exist yet) is tolerated and just skips manager payroll sync for
-      // this run, instead of failing the whole request.
+      // "Managers" is a newer, optional tab - a non-ok response here (tab
+      // doesn't exist yet) is tolerated and just skips manager payroll sync
+      // for this run, instead of failing the whole request.
       const managerRes = await fetch(
         `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Managers!A1:G`,
         { headers: { Authorization: `Bearer ${accessToken}` } }
@@ -248,103 +232,6 @@ export async function syncSheetsToFirestore(req: Request, res: Response) {
     }
 
     const syncTimestamp = new Date().toISOString();
-
-    // --- Therapists tab -------------------------------------------------
-    if (therapistRows.length > 0) {
-      const headers = therapistRows[0];
-      const idIndex = headers.indexOf("id");
-      const commissionRateIndex = headers.indexOf("commissionRate");
-      const baseSalaryIndex = headers.indexOf("baseSalary");
-      const totalCommissionEarnedIndex = headers.indexOf("totalCommissionEarned");
-
-      if (idIndex === -1) {
-        warnings.push("Kolom 'id' tidak ditemukan di tab Therapists pada Google Sheets - tab ini dilewati.");
-      } else {
-        for (const row of therapistRows.slice(1)) {
-          const therapistId = row[idIndex];
-          if (!therapistId) continue;
-
-          const fsData = await Therapist.findById(therapistId);
-          if (!fsData) continue; // Skip if therapist doesn't exist
-
-          const changes: { commissionRate?: number; baseSalary?: number; totalCommissionEarned?: number } = diffRateAndSalary(
-            row,
-            commissionRateIndex,
-            baseSalaryIndex,
-            fsData.commissionRate,
-            fsData.baseSalary,
-            `therapist ${fsData.name || therapistId}`,
-            warnings
-          );
-
-          // totalCommissionEarned is normally only ever incremented by
-          // processCheckout (see AUDIT_OWNED_FIELDS in
-          // sheetsPersistController.ts / PROTECTED_FIELDS in
-          // middleware/authorize.ts), so the generic bidirectional Sheets
-          // sync silently drops it - editing it in Sheets used to be a
-          // no-op. This is the second deliberate, audited exception (the
-          // first being PATCH /api/therapists/:id/commission-adjustment
-          // below): same HKA_MANAGEMENT-only gate, same PayrollAuditLog
-          // trail, just triggered from a Sheets edit instead of the app's
-          // pencil-icon adjuster.
-          const totalCommissionEarnedChange = diffNonNegativeField(
-            row,
-            totalCommissionEarnedIndex,
-            fsData.totalCommissionEarned,
-            "totalCommissionEarned",
-            `therapist ${fsData.name || therapistId}`,
-            warnings
-          );
-          if (totalCommissionEarnedChange !== undefined) {
-            changes.totalCommissionEarned = totalCommissionEarnedChange;
-          }
-
-          if (changes.commissionRate === undefined && changes.baseSalary === undefined && changes.totalCommissionEarned === undefined) continue;
-
-          const auditLogsToWrite: any[] = [];
-          if (changes.commissionRate !== undefined) {
-            auditLogsToWrite.push({
-              therapistId,
-              staffType: "therapist",
-              field: "commissionRate",
-              oldValue: fsData.commissionRate ?? null,
-              newValue: changes.commissionRate,
-              source: "google_sheets_sync",
-              timestamp: syncTimestamp,
-            });
-          }
-          if (changes.baseSalary !== undefined) {
-            auditLogsToWrite.push({
-              therapistId,
-              staffType: "therapist",
-              field: "baseSalary",
-              oldValue: fsData.baseSalary ?? null,
-              newValue: changes.baseSalary,
-              source: "google_sheets_sync",
-              timestamp: syncTimestamp,
-            });
-          }
-          if (changes.totalCommissionEarned !== undefined) {
-            auditLogsToWrite.push({
-              therapistId,
-              staffType: "therapist",
-              field: "totalCommissionEarned",
-              oldValue: fsData.totalCommissionEarned ?? null,
-              newValue: changes.totalCommissionEarned,
-              source: "google_sheets_sync",
-              timestamp: syncTimestamp,
-            });
-          }
-
-          await Therapist.updateOne({ _id: therapistId }, { $set: changes });
-          if (auditLogsToWrite.length > 0) {
-            await PayrollAuditLog.insertMany(auditLogsToWrite);
-          }
-        }
-      }
-    }
-
-    // --- Managers tab -----------------------------------------------------
     if (managerRows.length > 0) {
       const headers = managerRows[0];
       const idIndex = headers.indexOf("id");
