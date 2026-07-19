@@ -15,20 +15,24 @@ import Attendance from "../models/Attendance.js";
  *
  * ARCHITECTURE (single source of truth = the Sheet): this endpoint writes
  * whatever the connected Google Sheet says straight into MongoDB, for every
- * field on every one of the 8 tracked collections - including Therapist
- * commissionRate/baseSalary/currentSales/totalCommissionEarned, which used
- * to be carved out into a separate HKA_MANAGEMENT-only endpoint
- * (POST /api/syncSheetsToFirestore). That split caused two systems to
- * silently disagree about which one "owned" those fields - a Sheet edit
- * looked like it worked (the browser read it fine) but never actually
- * landed in the database. There is now exactly one direction of truth:
- * whatever is in the Sheet wins, full stop, regardless of who is logged in
+ * field on every one of the 8 tracked collections, including Therapist
+ * commissionRate/baseSalary/monthlyTarget - regardless of who is logged in
  * when the sync runs (see persistSheetsSync below - no role restriction).
  *
- * /api/syncSheetsToFirestore still exists only for the "Managers" tab
- * (Salon Manager payroll fields on the User model), since Users are
- * intentionally excluded from this endpoint (see below) and have no other
- * pipeline into the app.
+ * Two things are deliberately NOT written here even though they otherwise
+ * live on collections this endpoint manages:
+ *
+ * - `users`: Sheets can rename/reassign a therapist or product, but must
+ *   never touch passwordHash or other auth fields - account security stays
+ *   entirely inside the existing auth flow. Salon Manager payroll fields
+ *   instead flow through POST /api/syncSheetsToFirestore.
+ *
+ * - Therapist `currentSales`/`totalCommissionEarned` (see
+ *   AUDIT_OWNED_FIELDS below): these are accumulators written by real
+ *   checkouts, not plain human-set fields, and this endpoint's payload
+ *   comes from a browser's local/cached state - which can be stale. They
+ *   too flow through POST /api/syncSheetsToFirestore instead, which always
+ *   reads the Sheet fresh from the Google Sheets API at request time.
  *
  * The frontend's Google Sheets sync engine (src/lib/googleSheets.ts,
  * syncStateToSpreadsheetIncremental) already reads the connected spreadsheet,
@@ -40,12 +44,6 @@ import Attendance from "../models/Attendance.js";
  * This endpoint is the missing other half: it takes that same reconciled
  * dataset and writes it into MongoDB, per-field ($set, not a full replace),
  * so a Sheets edit is durable and visible to everyone.
- *
- * Deliberately excluded here: `users`. Sheets can rename/reassign a
- * therapist or product, but it must never be able to touch passwordHash or
- * other auth fields, and the frontend sync payload for users doesn't carry
- * a password anyway - account security stays entirely inside the existing
- * auth flow.
  */
 
 type Row = Record<string, any>;
@@ -56,13 +54,24 @@ type Row = Record<string, any>;
  * where a value truly can't come from the Sheet (nothing currently
  * qualifies for `therapists`; kept as an empty, documented seam rather than
  * removed outright in case a real auth-security field like this ever needs
- * one again). commissionRate/baseSalary/currentSales/totalCommissionEarned
- * used to be locked here - they no longer are, since the Sheet is now the
- * single source of truth for all Therapist business fields (see the
- * endpoint doc comment above).
+ * one again). currentSales and totalCommissionEarned ARE locked here,
+ * deliberately: they are accumulators written by real checkouts
+ * (server/controllers/checkoutController.ts), and this endpoint's payload
+ * comes from whatever a browser's local/cached state happens to hold at
+ * sync time - a stale tab, an unrelated field edit on the Sheet, or a
+ * device that hasn't seen the latest checkout yet can all trigger a push
+ * here that would otherwise $set these two fields back to a stale number,
+ * silently erasing real sales/commission. Sheet edits to these two fields
+ * still work - they're picked up by syncSheetsToFirestore
+ * (server/controllers/googleSheetsController.ts) instead, which always
+ * reads the Sheet fresh from the Google Sheets API at request time rather
+ * than trusting a browser's cached copy, and writes an audit log entry per
+ * change. commissionRate/baseSalary/monthlyTarget are NOT locked - they're
+ * plain human-set business inputs, not accumulators, so the generic
+ * whole-row sync is an acceptable path for them.
  */
 export const AUDIT_OWNED_FIELDS: Record<string, string[]> = {
-  therapists: [],
+  therapists: ["currentSales", "totalCommissionEarned"],
 };
 
 /**

@@ -151,21 +151,32 @@ export async function adjustTherapistCommission(req: Request, res: Response) {
  * Endpoint path kept unchanged for frontend compatibility even though the
  * datastore is now MongoDB.
  *
- * SCOPE (as of this revision): the "Therapists" tab handling that used to
- * live here has been removed - commissionRate/baseSalary/currentSales/
- * totalCommissionEarned now flow through the unified generic sync
- * (POST /api/sheets/persist), which treats the Sheet as the single source
- * of truth for every Therapist field. Keeping a second path that wrote the
- * same fields was exactly the "which system actually owns this" confusion
- * that caused edits to silently not stick.
+ * SCOPE (as of this revision): handles two things, both audited and both
+ * read fresh from the Sheet at request time (never from anything a browser
+ * cached):
  *
- * This endpoint now only handles the "Managers" tab -> User.commissionRate /
- * .baseSalary / .monthlyTarget for SALON_MANAGER accounts, since Users are
- * intentionally excluded from the generic sync (account/auth fields must
- * never flow through a generic content sync) and Managers has no other
- * pipeline into the app. A row that doesn't match an existing Salon
- * Manager account (wrong id, therapist id reused by mistake, etc) is
- * skipped with a warning instead of silently touching the wrong user.
+ * 1. "Managers" tab -> User.commissionRate / .baseSalary / .monthlyTarget
+ *    for SALON_MANAGER accounts, since Users are intentionally excluded
+ *    from the generic sync (account/auth fields must never flow through a
+ *    generic content sync) and Managers has no other pipeline into the
+ *    app. A row that doesn't match an existing Salon Manager account
+ *    (wrong id, therapist id reused by mistake, etc) is skipped with a
+ *    warning instead of silently touching the wrong user.
+ *
+ * 2. "Therapists" tab -> Therapist.currentSales / .totalCommissionEarned.
+ *    commissionRate/baseSalary/monthlyTarget for Therapists still flow
+ *    through the generic sync (POST /api/sheets/persist) same as every
+ *    other plain business field - but currentSales/totalCommissionEarned
+ *    are accumulators written by real checkouts
+ *    (server/controllers/checkoutController.ts), and are deliberately
+ *    excluded from that generic path (see AUDIT_OWNED_FIELDS in
+ *    sheetsPersistController.ts). The generic path's payload comes from a
+ *    browser's local/cached state, which can lag behind the real MongoDB
+ *    total or hold a stale number from an earlier test - pushing that
+ *    straight into MongoDB on every sync (even one triggered by an
+ *    unrelated Sheet edit) would silently overwrite real sales/commission.
+ *    This endpoint is the only path allowed to set them, specifically
+ *    because it reads the Sheet itself, live, every time it runs.
  *
  * Not role-gated: any authenticated session can trigger it, same as
  * /api/sheets/persist - the Sheet is the source of truth regardless of who
@@ -193,6 +204,7 @@ export async function syncSheetsToFirestore(req: Request, res: Response) {
     // spreadsheets that haven't added it yet - that's a warning, not a
     // hard failure.
     let managerRows: any[][] = [];
+    let therapistRows: any[][] = [];
     const warnings: string[] = [];
 
     if (appsScriptUrl) {
@@ -212,6 +224,12 @@ export async function syncSheetsToFirestore(req: Request, res: Response) {
       if (managerRows.length === 0) {
         warnings.push('Tab "Managers" tidak ditemukan atau kosong di Google Sheets - dilewati.');
       }
+      // Same "read" response already contains every tab (see the Managers
+      // handling above) - no extra round-trip needed for Therapists.
+      therapistRows = json.data?.["Therapists"] || [];
+      if (therapistRows.length === 0) {
+        warnings.push('Tab "Therapists" tidak ditemukan atau kosong di Google Sheets - sinkronisasi currentSales/totalCommissionEarned dilewati.');
+      }
     } else {
       if (!accessToken) {
         return res.status(400).json({ error: "Missing Google access token." });
@@ -228,6 +246,22 @@ export async function syncSheetsToFirestore(req: Request, res: Response) {
         managerRows = managerJson.values || [];
       } else {
         warnings.push('Tab "Managers" belum ditemukan di Google Sheets - dilewati. Tambahkan tab ini untuk sinkronisasi gaji/komisi Salon Manager.');
+      }
+
+      // Read straight from the Sheets API here too (not from anything the
+      // browser cached) - this is precisely what keeps currentSales/
+      // totalCommissionEarned safe from being stomped by a stale client
+      // snapshot: this endpoint only ever trusts what the Sheet says at
+      // the exact moment it's called.
+      const therapistRes = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Therapists!A1:L`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      if (therapistRes.ok) {
+        const therapistJson: any = await therapistRes.json();
+        therapistRows = therapistJson.values || [];
+      } else {
+        warnings.push('Tab "Therapists" gagal dibaca dari Google Sheets - sinkronisasi currentSales/totalCommissionEarned dilewati untuk sync ini.');
       }
     }
 
@@ -328,6 +362,95 @@ export async function syncSheetsToFirestore(req: Request, res: Response) {
           }
 
           await User.updateOne({ _id: managerId }, { $set: changes });
+          if (auditLogsToWrite.length > 0) {
+            await PayrollAuditLog.insertMany(auditLogsToWrite);
+          }
+        }
+      }
+    }
+
+    // Therapists tab -> Therapist.currentSales / .totalCommissionEarned.
+    // These two are the accumulator fields locked out of the generic
+    // /api/sheets/persist path (see AUDIT_OWNED_FIELDS in
+    // sheetsPersistController.ts) precisely so they can only ever be
+    // changed here, from a Sheet read taken fresh in this same request -
+    // never from a browser's local/cached copy of a therapist record.
+    if (therapistRows.length > 0) {
+      const headers = therapistRows[0];
+      const idIndex = headers.indexOf("id");
+      const currentSalesIndex = headers.indexOf("currentSales");
+      const totalCommissionEarnedIndex = headers.indexOf("totalCommissionEarned");
+
+      if (idIndex === -1) {
+        warnings.push("Kolom 'id' tidak ditemukan di tab Therapists pada Google Sheets - sinkronisasi currentSales/totalCommissionEarned dilewati.");
+      } else if (currentSalesIndex === -1 && totalCommissionEarnedIndex === -1) {
+        warnings.push("Kolom 'currentSales'/'totalCommissionEarned' tidak ditemukan di tab Therapists - sinkronisasi dilewati.");
+      } else {
+        for (const row of therapistRows.slice(1)) {
+          const therapistId = row[idIndex];
+          if (!therapistId) continue;
+
+          const therapistDoc = await Therapist.findById(therapistId);
+          if (!therapistDoc) {
+            warnings.push(`Baris Therapists dengan id "${therapistId}" tidak ditemukan sebagai akun therapist - dilewati.`);
+            continue;
+          }
+
+          const changes: { currentSales?: number; totalCommissionEarned?: number } = {};
+
+          const currentSalesChange = diffNonNegativeField(
+            row,
+            currentSalesIndex,
+            therapistDoc.currentSales,
+            "currentSales",
+            `therapist ${therapistDoc.name || therapistId}`,
+            warnings
+          );
+          if (currentSalesChange !== undefined) {
+            changes.currentSales = currentSalesChange;
+          }
+
+          const totalCommissionEarnedChange = diffNonNegativeField(
+            row,
+            totalCommissionEarnedIndex,
+            therapistDoc.totalCommissionEarned,
+            "totalCommissionEarned",
+            `therapist ${therapistDoc.name || therapistId}`,
+            warnings
+          );
+          if (totalCommissionEarnedChange !== undefined) {
+            changes.totalCommissionEarned = totalCommissionEarnedChange;
+          }
+
+          if (changes.currentSales === undefined && changes.totalCommissionEarned === undefined) {
+            continue;
+          }
+
+          const auditLogsToWrite: any[] = [];
+          if (changes.currentSales !== undefined) {
+            auditLogsToWrite.push({
+              therapistId,
+              staffType: "therapist",
+              field: "currentSales",
+              oldValue: therapistDoc.currentSales ?? null,
+              newValue: changes.currentSales,
+              source: "google_sheets_sync",
+              timestamp: syncTimestamp,
+            });
+          }
+          if (changes.totalCommissionEarned !== undefined) {
+            auditLogsToWrite.push({
+              therapistId,
+              staffType: "therapist",
+              field: "totalCommissionEarned",
+              oldValue: therapistDoc.totalCommissionEarned ?? null,
+              newValue: changes.totalCommissionEarned,
+              source: "google_sheets_sync",
+              timestamp: syncTimestamp,
+            });
+          }
+
+          await Therapist.updateOne({ _id: therapistId }, { $set: changes });
           if (auditLogsToWrite.length > 0) {
             await PayrollAuditLog.insertMany(auditLogsToWrite);
           }
