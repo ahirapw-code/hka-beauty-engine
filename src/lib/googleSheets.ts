@@ -730,47 +730,56 @@ export const syncStateToSpreadsheetIncremental = async (
           }
         }
       } else {
+        if (!lastSyncedRow) {
+          // No sync baseline for this record at all - it has never been
+          // written to the Sheet yet (e.g. created moments ago, in between
+          // sync runs, or this is the very first sync on this
+          // browser/device). This is ALWAYS a brand-new local record, full
+          // stop - never a deletion, even if the tab currently happens to
+          // be empty (sheetIsEmptied). A record can't have been "removed
+          // from the Sheet" if it was never on the Sheet in the first
+          // place. Checking this before sheetIsEmptied is the fix: the old
+          // order let sheetIsEmptied win regardless of baseline, which
+          // meant any booking (or other record) created while the
+          // connected tab happened to have zero data rows - a completely
+          // normal, non-deliberate state, not just a manual clear-out - was
+          // immediately deleted from the app AND the database on the next
+          // auto-sync, often within seconds of being created.
+          appendsToPush[sheetName].push(localRow);
+          pushedCount++;
+          nextLocalRecords.push(record);
+          newLastSyncedRaw[sheetName][id] = localRow;
+          continue;
+        }
+
         if (sheetIsEmptied) {
-          // The whole tab (aside from its header row) is empty. Treat this
-          // as an explicit, deliberate reset of this collection - not as
-          // "this record just hasn't synced yet". Without this check, any
-          // local record with no lastSyncedRow baseline (e.g. created after
-          // the last successful sync, or first-ever sync on this
-          // browser/device) fell straight into the "New local record"
-          // branch below and got appended right back into a tab someone
-          // had just cleared out by hand, making a manual full-tab reset
-          // impossible. An emptied tab is checked first, ahead of the
-          // baseline check, so it wins regardless of baseline state.
+          // The whole tab (aside from its header row) is empty, AND this
+          // record does have a prior baseline - i.e. it really was on the
+          // Sheet before. Treat this as an explicit, deliberate reset of
+          // this collection.
           conflictLog.push(
             `Tab ${sheetName} dikosongkan (hanya header tersisa) - record ${id} dianggap sengaja dihapus, ikut dihapus dari app & database.`
           );
           deletedIds[sheetName] = deletedIds[sheetName] || [];
           deletedIds[sheetName].push(id);
           // Not pushed to nextLocalRecords, and no baseline kept - it's gone.
-        } else if (lastSyncedRow) {
-          if (headers.length === 0) {
-            // The read for this whole sheet came back with no header row -
-            // that means the read itself failed or hit the wrong tab, not
-            // that every row was deleted. Treating this as a mass-delete is
-            // exactly what caused data to "revert to mock data" before.
-            // Keep the record and let the next successful sync reconcile it.
-            conflictLog.push(`Sheet ${sheetName} gagal terbaca saat sync - data lokal dipertahankan, tidak dianggap terhapus.`);
-            nextLocalRecords.push(record);
-            newLastSyncedRaw[sheetName][id] = lastSyncedRow;
-          } else {
-            // The sheet read fine, and this specific row is genuinely gone -
-            // honor the deletion, both locally and (via deletedIds) in MongoDB.
-            conflictLog.push(`Record ${id} dihapus di Sheet - dihapus juga dari app.`);
-            deletedIds[sheetName] = deletedIds[sheetName] || [];
-            deletedIds[sheetName].push(id);
-            // Not pushed to nextLocalRecords, and no baseline kept - it's gone.
-          }
-        } else {
-          // New local record
-          appendsToPush[sheetName].push(localRow);
-          pushedCount++;
+        } else if (headers.length === 0) {
+          // The read for this whole sheet came back with no header row -
+          // that means the read itself failed or hit the wrong tab, not
+          // that every row was deleted. Treating this as a mass-delete is
+          // exactly what caused data to "revert to mock data" before.
+          // Keep the record and let the next successful sync reconcile it.
+          conflictLog.push(`Sheet ${sheetName} gagal terbaca saat sync - data lokal dipertahankan, tidak dianggap terhapus.`);
           nextLocalRecords.push(record);
-          newLastSyncedRaw[sheetName][id] = localRow;
+          newLastSyncedRaw[sheetName][id] = lastSyncedRow;
+        } else {
+          // The sheet read fine, this record has a prior baseline, and this
+          // specific row is genuinely gone - honor the deletion, both
+          // locally and (via deletedIds) in MongoDB.
+          conflictLog.push(`Record ${id} dihapus di Sheet - dihapus juga dari app.`);
+          deletedIds[sheetName] = deletedIds[sheetName] || [];
+          deletedIds[sheetName].push(id);
+          // Not pushed to nextLocalRecords, and no baseline kept - it's gone.
         }
       }
     }
