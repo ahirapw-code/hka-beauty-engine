@@ -13,17 +13,22 @@ import Attendance from "../models/Attendance.js";
 /**
  * POST /api/sheets/persist
  *
- * NOTE ON THE TWO SYNC ENDPOINTS: this endpoint and
- * POST /api/syncSheetsToFirestore (server/controllers/googleSheetsController.ts)
- * are not redundant - they cover different data:
- *   - /api/sheets/persist  → the 8 main collections tracked by the
- *     client-side sync engine (Customers, Bookings, Transactions,
- *     Therapists, Products, Services, Expenses, Attendance).
- *   - /api/syncSheetsToFirestore → payroll/commission-rate fields only,
- *     which aren't part of that client-side engine yet. It's called right
- *     after this one on every sync (see GoogleSheetsSync.tsx).
- * If payroll ever gets added as a proper tab in the main sync engine, this
- * split can be retired - until then, both are needed.
+ * ARCHITECTURE (single source of truth = the Sheet): this endpoint writes
+ * whatever the connected Google Sheet says straight into MongoDB, for every
+ * field on every one of the 8 tracked collections - including Therapist
+ * commissionRate/baseSalary/currentSales/totalCommissionEarned, which used
+ * to be carved out into a separate HKA_MANAGEMENT-only endpoint
+ * (POST /api/syncSheetsToFirestore). That split caused two systems to
+ * silently disagree about which one "owned" those fields - a Sheet edit
+ * looked like it worked (the browser read it fine) but never actually
+ * landed in the database. There is now exactly one direction of truth:
+ * whatever is in the Sheet wins, full stop, regardless of who is logged in
+ * when the sync runs (see persistSheetsSync below - no role restriction).
+ *
+ * /api/syncSheetsToFirestore still exists only for the "Managers" tab
+ * (Salon Manager payroll fields on the User model), since Users are
+ * intentionally excluded from this endpoint (see below) and have no other
+ * pipeline into the app.
  *
  * The frontend's Google Sheets sync engine (src/lib/googleSheets.ts,
  * syncStateToSpreadsheetIncremental) already reads the connected spreadsheet,
@@ -47,15 +52,19 @@ type Row = Record<string, any>;
 
 /**
  * Fields that must never be written through this endpoint even though they
- * live on collections this endpoint otherwise manages. These are owned by
- * dedicated, audited flows (processCheckout for sales/commission accrual,
- * the HKA_MANAGEMENT-only /api/syncSheetsToFirestore for commission-rate /
- * base-salary changes, which also writes a PayrollAuditLog entry). Letting
- * a plain Sheets-content sync silently overwrite them would both fight
- * those flows and let a payroll change land with no audit trail.
+ * live on collections this endpoint otherwise manages - reserved for cases
+ * where a value truly can't come from the Sheet (nothing currently
+ * qualifies for `therapists`; kept as an empty, documented seam rather than
+ * removed outright in case a real auth-security field like this ever needs
+ * one again). commissionRate/baseSalary/currentSales/totalCommissionEarned
+ * used to be locked here - they no longer are, since the Sheet is now the
+ * single source of truth for all Therapist business fields (see the
+ * endpoint doc comment above and the monthly reset cron in
+ * sheetsCronController.ts, which keeps currentSales's baseline consistent
+ * between the Sheet and MongoDB across a payroll cycle).
  */
 export const AUDIT_OWNED_FIELDS: Record<string, string[]> = {
-  therapists: ["commissionRate", "baseSalary", "currentSales", "totalCommissionEarned"],
+  therapists: [],
 };
 
 /**
