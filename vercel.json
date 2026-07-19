@@ -12,5 +12,9 @@
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/index" },
     { "source": "/(.*)", "destination": "/index.html" }
+  ],
+  "crons": [
+    { "path": "/api/cron/sync-sheets", "schedule": "0 * * * *" },
+    { "path": "/api/cron/reset-monthly-sales", "schedule": "0 0 1 * *" }
   ]
 }
