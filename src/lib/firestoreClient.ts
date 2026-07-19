@@ -231,14 +231,100 @@ export function writeBatch(_db: DbHandle) {
 // We approximate `onSnapshot` by polling the same endpoint on an interval
 // and only invoking the callback with fresh data, which keeps consuming
 // components (they just get a callback + unsubscribe function) unchanged.
+//
+// App.tsx's main sync effect subscribes to 8 top-level collections at once
+// (customers/bookings/transactions/therapists/products/expenses/attendance/
+// services). Each used to poll independently every 4s - 8 separate HTTP
+// requests/serverless invocations every 4s per open tab, which is what was
+// driving the Atlas M0 connection count over its limit. For exactly that
+// set of plain top-level collections we now batch all 8 into a single
+// `GET /api/data/_sync` request per tick (server/controllers/dataController.ts
+// -> syncCollections), cutting request volume ~8x. Anything else (a single
+// doc, or a filtered/ordered query) still falls back to the original
+// one-ref-per-poll behavior below, since those aren't part of the batch.
+const SNAPSHOT_POLL_INTERVAL_MS = 15_000;
 
-const SNAPSHOT_POLL_INTERVAL_MS = 4000;
+const BATCHABLE_COLLECTIONS = new Set([
+  "customers",
+  "bookings",
+  "transactions",
+  "therapists",
+  "products",
+  "expenses",
+  "attendance",
+  "services",
+]);
+
+interface BatchListener {
+  onNext: (snapshot: QuerySnapshot) => void;
+  onError?: (error: any) => void;
+}
+
+const batchListeners = new Map<string, Set<BatchListener>>();
+let batchTimer: ReturnType<typeof setInterval> | null = null;
+let batchInFlight = false;
+
+function docsToSnapshot(docs: any[]): QuerySnapshot {
+  return makeQuerySnapshot(docs.map((d) => makeDocSnapshot(d.id, true, d)));
+}
+
+async function runBatchSync() {
+  if (batchInFlight || batchListeners.size === 0) return;
+  batchInFlight = true;
+  try {
+    const result = await authFetch(`/api/data/_sync`);
+    for (const [name, subs] of batchListeners) {
+      if (subs.size === 0) continue;
+      const entry = result?.[name];
+      if (!entry || entry.forbidden) continue;
+      const snapshot = docsToSnapshot(entry.docs || []);
+      subs.forEach(({ onNext }) => onNext(snapshot));
+    }
+  } catch (err) {
+    for (const subs of batchListeners.values()) {
+      subs.forEach(({ onError }) => onError && onError(err));
+    }
+  } finally {
+    batchInFlight = false;
+  }
+}
+
+function ensureBatchLoop() {
+  if (batchTimer) return;
+  runBatchSync();
+  batchTimer = setInterval(runBatchSync, SNAPSHOT_POLL_INTERVAL_MS);
+}
+
+function stopBatchLoopIfIdle() {
+  let total = 0;
+  for (const subs of batchListeners.values()) total += subs.size;
+  if (total === 0 && batchTimer) {
+    clearInterval(batchTimer);
+    batchTimer = null;
+  }
+}
 
 export function onSnapshot(
   ref: Ref | DocRef,
   onNext: (snapshot: any) => void,
   onError?: (error: any) => void
 ): () => void {
+  if (ref.type === "collection" && BATCHABLE_COLLECTIONS.has(ref.path)) {
+    const listener: BatchListener = { onNext, onError };
+    let subs = batchListeners.get(ref.path);
+    if (!subs) {
+      subs = new Set();
+      batchListeners.set(ref.path, subs);
+    }
+    subs.add(listener);
+    ensureBatchLoop();
+
+    return () => {
+      subs!.delete(listener);
+      stopBatchLoopIfIdle();
+    };
+  }
+
   let cancelled = false;
 
   const tick = async () => {

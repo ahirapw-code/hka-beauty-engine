@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 
-type Role = "HKA_MANAGEMENT" | "SALON_MANAGER" | "THERAPIST";
+export type Role = "HKA_MANAGEMENT" | "SALON_MANAGER" | "THERAPIST";
 
 const MANAGEMENT: Role[] = ["HKA_MANAGEMENT", "SALON_MANAGER"];
 const ALL_ROLES: Role[] = ["HKA_MANAGEMENT", "SALON_MANAGER", "THERAPIST"];
@@ -108,6 +108,30 @@ const POLICIES: Record<string, CollectionPolicy> = {
 
 function roleAllows(list: Role[] | "all", role: Role): boolean {
   return list === "all" || list.includes(role);
+}
+
+/**
+ * Pure (no req/res) version of the "read" branch of authorizeCollectionAccess,
+ * for callers that need to check read access to several collections in one
+ * request (e.g. the combined /_sync endpoint) instead of going through
+ * Express middleware per collection. Kept in sync with the read branch
+ * below by construction - if that branch's logic changes, update this too.
+ */
+export function resolveReadAccess(
+  collection: string,
+  role: Role,
+  uid: string
+): { allowed: boolean; ownerFilter?: { field: string; value: string } } {
+  const policy = POLICIES[collection];
+  if (!policy) return { allowed: false };
+  if (!roleAllows(policy.read, role)) return { allowed: false };
+
+  const isManagementReader = MANAGEMENT.includes(role);
+  if (!isManagementReader && policy.selfScopedFor?.includes(role)) {
+    const ownerField = policy.ownerField || "_id";
+    return { allowed: true, ownerFilter: { field: ownerField, value: uid } };
+  }
+  return { allowed: true };
 }
 
 /**

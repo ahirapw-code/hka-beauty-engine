@@ -6,6 +6,7 @@ import {
   updateDocument,
   deleteDocument,
   batchSetDocuments,
+  syncCollections,
 } from "../controllers/dataController.js";
 import { requireAuthWithProfile } from "../middleware/auth.js";
 import { authorizeCollectionAccess } from "../middleware/authorize.js";
@@ -27,6 +28,10 @@ router.use(requireAuthWithProfile);
 // before any 400 about payload shape) and only adds a schema check for
 // "customers", "bookings", "products", "services" -- every other collection
 // keeps behaving exactly as before.
+// Must come before the "/:collection" catch-all below, or Express would
+// match this path as collection="_sync" and 404 it via getModel().
+router.get("/_sync", syncCollections);
+
 router.get("/:collection", authorizeCollectionAccess("read"), validateDataListQuery, listDocuments);
 router.get("/:collection/:id", authorizeCollectionAccess("read"), validateDataIdParam, getDocument);
 

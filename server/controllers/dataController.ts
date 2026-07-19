@@ -1,5 +1,66 @@
 import { Request, Response } from "express";
 import { collectionRegistry } from "../models/index.js";
+import { resolveReadAccess, Role } from "../middleware/authorize.js";
+
+/**
+ * The 8 top-level collections App.tsx's main real-time-sync effect watches
+ * (src/App.tsx, via src/lib/firestoreClient.ts's onSnapshot). Each used to
+ * be its own independent 4s poll - 8 requests every 4s per open tab, which
+ * was the main driver of the Atlas M0 free-tier "connections exceeded
+ * threshold" alert. This single endpoint fetches all of them in one
+ * request (one connectToDatabase() call, run in parallel with Promise.all),
+ * so the frontend now makes 1 request per poll tick instead of 8.
+ */
+const SYNC_COLLECTIONS = [
+  "customers",
+  "bookings",
+  "transactions",
+  "therapists",
+  "products",
+  "expenses",
+  "attendance",
+  "services",
+] as const;
+
+/**
+ * GET /api/data/_sync
+ * Combined read of all SYNC_COLLECTIONS in one round trip. Applies the
+ * exact same per-collection read policy (including owner-scoping for
+ * self-scoped roles) as the generic GET /:collection route via
+ * resolveReadAccess - a collection the caller isn't allowed to read comes
+ * back as `{ docs: [], forbidden: true }` instead of a 403 for the whole
+ * request, so one restricted collection (e.g. "expenses" for a THERAPIST)
+ * doesn't block the rest of the sync.
+ */
+export async function syncCollections(req: Request, res: Response) {
+  const role = req.auth?.role as Role | undefined;
+  const uid = req.auth?.uid;
+  if (!role || !uid) {
+    return res.status(403).json({ error: "Forbidden: user role could not be determined." });
+  }
+
+  try {
+    const entries = await Promise.all(
+      SYNC_COLLECTIONS.map(async (name) => {
+        const access = resolveReadAccess(name, role, uid);
+        if (!access.allowed) {
+          return [name, { docs: [], forbidden: true }] as const;
+        }
+        const model = collectionRegistry[name];
+        const filter = access.ownerFilter ? { [access.ownerFilter.field]: access.ownerFilter.value } : {};
+        const docs = await model.find(filter).exec();
+        return [name, { docs: docs.map((d) => d.toJSON()) }] as const;
+      })
+    );
+
+    const payload: Record<string, { docs: any[]; forbidden?: boolean }> = {};
+    for (const [name, data] of entries) payload[name] = data;
+    return res.status(200).json(payload);
+  } catch (err: any) {
+    console.error("Error in combined /_sync:", err);
+    return res.status(500).json({ error: err.message || "Failed to sync collections." });
+  }
+}
 
 function getModel(req: Request, res: Response) {
   const { collection } = req.params;
