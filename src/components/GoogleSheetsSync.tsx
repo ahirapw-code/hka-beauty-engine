@@ -24,7 +24,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { doc, onSnapshot, setDoc } from '../lib/firestoreClient';
 import { db, auth } from '../lib/firebase';
-import { persistSheetsSyncToServer } from '../lib/sheetsPersist';
+import { persistSheetsSyncToServer, fetchSheetsSyncBaseline, saveSheetsSyncBaseline } from '../lib/sheetsPersist';
 import { notifyUnauthorized } from '../lib/authClient';
 
 interface GoogleSheetsSyncProps {
@@ -326,11 +326,19 @@ export default function GoogleSheetsSync({
     }
 
     try {
+      // Fetch the server-shared baseline (see fetchSheetsSyncBaseline,
+      // src/lib/sheetsPersist.ts) rather than reading it out of this
+      // browser's own localStorage - a per-browser baseline is what let a
+      // deletion made via the Sheet get silently undone by some OTHER
+      // open session's next auto-sync tick.
+      const syncBaseline = await fetchSheetsSyncBaseline();
+
       const result = await syncStateToSpreadsheetIncremental(
         spreadsheetId,
         token,
         latestDataRef.current,
-        appsScriptUrl
+        appsScriptUrl,
+        syncBaseline
       );
 
       // Apply updated, merged state
@@ -418,6 +426,20 @@ export default function GoogleSheetsSync({
           // from a real, fully-successful sync. Surface it honestly (but
           // calmly, not as a scary red error) instead.
           setPersistBlockedForRole(true);
+        }
+      }
+
+      if (!persistFailed) {
+        // Advance the shared baseline only now that the reconciled data (and
+        // any deletions) are durably in MongoDB. If persist had failed, the
+        // OLD baseline is left in place so the next sync run - on this
+        // device or any other - re-derives the same reconciliation instead
+        // of a deletion "confirming" here without ever having happened in
+        // the database.
+        try {
+          await saveSheetsSyncBaseline(result.newSyncBaseline);
+        } catch (baselineErr) {
+          console.error('Error saving Sheets sync baseline:', baselineErr);
         }
       }
 

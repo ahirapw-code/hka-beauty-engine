@@ -5,10 +5,10 @@ import { Customer, Booking, Transaction, Therapist, Product, Service, Expense, A
 /**
  * Sends the reconciled dataset produced by syncStateToSpreadsheetIncremental
  * (src/lib/googleSheets.ts) to the server so it's actually saved to
- * MongoDB, not just held in React state. Management-only on the server
- * side (server/controllers/sheetsPersistController.ts). `users` is
- * intentionally not sent - account/auth fields are never sourced from
- * Sheets.
+ * MongoDB, not just held in React state. Any authenticated staff session
+ * may call this (server/controllers/sheetsPersistController.ts has no role
+ * check here). `users` is intentionally not sent - account/auth fields are
+ * never sourced from Sheets.
  */
 export async function persistSheetsSyncToServer(
   data: {
@@ -64,5 +64,84 @@ export async function persistSheetsSyncToServer(
       notifyUnauthorized();
     }
     throw new Error(errData.error || `Failed to persist Sheets sync (status ${response.status})`);
+  }
+}
+
+export interface SheetsSyncBaseline {
+  lastSyncedRaw: { [sheetName: string]: { [id: string]: any[] } };
+  missingCandidates: { [sheetName: string]: string[] };
+}
+
+const EMPTY_BASELINE: SheetsSyncBaseline = { lastSyncedRaw: {}, missingCandidates: {} };
+
+/**
+ * Fetches the shared "what did we last see on the Sheet for each record"
+ * baseline that syncStateToSpreadsheetIncremental (src/lib/googleSheets.ts)
+ * uses to tell a genuine Sheet-side deletion apart from a record that was
+ * simply never on the Sheet yet.
+ *
+ * This used to be read straight out of this browser's own localStorage,
+ * which meant every other open session (a different POS device, a
+ * different staff member's browser, a cleared cache) had no idea a record
+ * had ever been synced - so the next time ANY of those sessions ran its own
+ * 30s auto-sync, it would see "I have this record locally but it's not on
+ * the Sheet, and I've never heard of it before" and push it straight back
+ * onto the Sheet, undoing the deletion. Fetching a server-shared baseline
+ * here instead means every device is reasoning from the same history.
+ *
+ * Falls back to an empty baseline (not a thrown error) on failure, so a
+ * transient network hiccup degrades to "treat unfamiliar records
+ * conservatively" (the existing safe default for a first-ever sync)
+ * instead of blocking the whole sync.
+ */
+export async function fetchSheetsSyncBaseline(): Promise<SheetsSyncBaseline> {
+  try {
+    const idToken = await auth.currentUser?.getIdToken();
+    if (!idToken) return EMPTY_BASELINE;
+    const response = await fetch('/api/sheets/baseline', {
+      headers: { Authorization: `Bearer ${idToken}` },
+    });
+    if (!response.ok) {
+      if (response.status === 401) notifyUnauthorized();
+      return EMPTY_BASELINE;
+    }
+    const data = await response.json();
+    return {
+      lastSyncedRaw: data.lastSyncedRaw || {},
+      missingCandidates: data.missingCandidates || {},
+    };
+  } catch {
+    return EMPTY_BASELINE;
+  }
+}
+
+/**
+ * Persists the updated baseline back to the server after a sync run, so the
+ * next device to sync - whichever one that is - sees the same history this
+ * run just established. Deliberately only called after
+ * persistSheetsSyncToServer has succeeded (see GoogleSheetsSync.tsx): if the
+ * reconciled data never actually made it into MongoDB, advancing the
+ * baseline anyway would let a real deletion "confirm" here without ever
+ * having happened in the database.
+ */
+export async function saveSheetsSyncBaseline(baseline: SheetsSyncBaseline): Promise<void> {
+  const idToken = await auth.currentUser?.getIdToken();
+  if (!idToken) return;
+  const response = await fetch('/api/sheets/baseline', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${idToken}`,
+    },
+    body: JSON.stringify(baseline),
+  });
+  if (!response.ok) {
+    if (response.status === 401) notifyUnauthorized();
+    // Best-effort: a failure here just means the NEXT sync run re-derives
+    // roughly the same reconciliation (worst case, a record needs one more
+    // "missing candidate" pass before a deletion is honored again) rather
+    // than corrupting local state, so it's logged rather than thrown.
+    const errData = await response.json().catch(() => ({}));
+    console.error('Failed to save Sheets sync baseline:', errData.error || response.status);
   }
 }

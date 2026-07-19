@@ -446,6 +446,19 @@ export interface SyncResult {
   conflictLog: string[];
   pushedCount: number;
   deletedIds: { [sheetName: string]: string[] };
+  /**
+   * The reconciled "what the Sheet said for each record on this run"
+   * baseline, and the updated missing-candidates tracking. The caller
+   * (GoogleSheetsSync.tsx) is responsible for persisting this via
+   * saveSheetsSyncBaseline (src/lib/sheetsPersist.ts) so every device
+   * shares the same history - see SYNC_BASELINE_DOC_ID in
+   * server/controllers/sheetsPersistController.ts for why this can no
+   * longer just live in this browser's localStorage.
+   */
+  newSyncBaseline: {
+    lastSyncedRaw: { [sheetName: string]: { [id: string]: any[] } };
+    missingCandidates: { [sheetName: string]: string[] };
+  };
 }
 
 // Map a business object to cell values array
@@ -559,7 +572,11 @@ export const syncStateToSpreadsheetIncremental = async (
     attendance: Attendance[];
     users: User[];
   },
-  appsScriptUrl: string | null = null
+  appsScriptUrl: string | null = null,
+  syncBaseline: {
+    lastSyncedRaw: { [sheetName: string]: { [id: string]: any[] } };
+    missingCandidates: { [sheetName: string]: string[] };
+  } = { lastSyncedRaw: {}, missingCandidates: {} }
 ): Promise<SyncResult> => {
   let remoteDataRaw: { [sheetName: string]: any[][] } = {};
 
@@ -603,9 +620,12 @@ export const syncStateToSpreadsheetIncremental = async (
     });
   }
 
-  // 2. Load previous sync baseline
-  const lastSyncedRawStr = localStorage.getItem('hka_sheets_last_synced_data');
-  const lastSyncedRaw = lastSyncedRawStr ? JSON.parse(lastSyncedRawStr) : {};
+  // 2. Load previous sync baseline. This now comes from the caller (fetched
+  // from the shared server-side baseline in sheetsPersistController.ts via
+  // fetchSheetsSyncBaseline, src/lib/sheetsPersist.ts) rather than this
+  // browser's own localStorage - see newSyncBaseline on SyncResult above for
+  // why a per-browser baseline caused deleted records to reappear.
+  const lastSyncedRaw = syncBaseline.lastSyncedRaw || {};
 
   // 2b. Load the previous run's "missing candidates" - ids that had a sync
   // baseline but weren't found in local state on the LAST sync pass (see
@@ -622,10 +642,7 @@ export const syncStateToSpreadsheetIncremental = async (
   // deletions (e.g. ERP's "Revoke operator credentials" button) go
   // through, just one cycle later, while giving transient blips a chance
   // to self-correct first.
-  const missingCandidatesRawStr = localStorage.getItem('hka_sheets_missing_candidates');
-  const previousMissingCandidates: { [sheetName: string]: string[] } = missingCandidatesRawStr
-    ? JSON.parse(missingCandidatesRawStr)
-    : {};
+  const previousMissingCandidates: { [sheetName: string]: string[] } = syncBaseline.missingCandidates || {};
   const nextMissingCandidates: { [sheetName: string]: string[] } = {};
 
   const sheetNames = ['Customers', 'Bookings', 'Transactions', 'Therapists', 'Products', 'Services', 'Expenses', 'Attendance', 'Users'];
@@ -914,15 +931,19 @@ export const syncStateToSpreadsheetIncremental = async (
     }
   }
 
-  // 6. Persist baseline values for optimistic locking
-  localStorage.setItem('hka_sheets_last_synced_data', JSON.stringify(newLastSyncedRaw));
-  localStorage.setItem('hka_sheets_missing_candidates', JSON.stringify(nextMissingCandidates));
-
+  // 6. Return the reconciled baseline for the caller to persist server-side
+  // (saveSheetsSyncBaseline in src/lib/sheetsPersist.ts) so every device
+  // shares it on the next sync, rather than writing straight to this
+  // browser's own localStorage.
   return {
     updatedLocalData,
     conflictLog,
     pushedCount,
-    deletedIds
+    deletedIds,
+    newSyncBaseline: {
+      lastSyncedRaw: newLastSyncedRaw,
+      missingCandidates: nextMissingCandidates,
+    },
   };
 };
 

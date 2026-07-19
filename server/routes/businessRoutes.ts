@@ -3,7 +3,7 @@ import { processCheckout } from "../controllers/checkoutController.js";
 import { clockInOut } from "../controllers/attendanceController.js";
 import { resetStaffPassword } from "../controllers/resetPasswordController.js";
 import { syncSheetsToFirestore, adjustTherapistCommission } from "../controllers/googleSheetsController.js";
-import { persistSheetsSync } from "../controllers/sheetsPersistController.js";
+import { persistSheetsSync, getSheetsSyncBaseline, saveSheetsSyncBaseline } from "../controllers/sheetsPersistController.js";
 import { createBooking, createExpense, createPayrollRun, updateBookingStatus, activateMembership, createTherapist, createCustomer } from "../controllers/recordsController.js";
 import { getPayrollPreview } from "../controllers/payrollController.js";
 import { requireAuthWithProfile } from "../middleware/auth.js";
@@ -32,5 +32,7 @@ router.get("/payroll/preview", requireAuthWithProfile, getPayrollPreview);
 router.post("/payroll/run", createPayrollRun);
 
 router.post("/sheets/persist", requireAuthWithProfile, persistSheetsSync);
+router.get("/sheets/baseline", requireAuthWithProfile, getSheetsSyncBaseline);
+router.post("/sheets/baseline", requireAuthWithProfile, saveSheetsSyncBaseline);
 
 export default router;

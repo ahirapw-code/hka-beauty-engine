@@ -9,6 +9,7 @@ import Product from "../models/Product.js";
 import Service from "../models/Service.js";
 import Expense from "../models/Expense.js";
 import Attendance from "../models/Attendance.js";
+import Setting from "../models/Setting.js";
 
 /**
  * POST /api/sheets/persist
@@ -208,6 +209,74 @@ export async function persistSheetsData(payload: SheetsSyncPayload) {
   };
 
   return { written, deleted };
+}
+
+// The sync engine (src/lib/googleSheets.ts, syncStateToSpreadsheetIncremental)
+// needs to remember, per record id, "what the Sheet said the last time we
+// successfully reconciled it" - that's what lets it tell "this row is gone
+// because someone deleted it" apart from "this row is gone because it was
+// never on the Sheet yet". That baseline used to live only in the browser's
+// own localStorage.
+//
+// The problem: this app runs on multiple devices/browsers at once (cashier
+// POS, therapist stations, manager laptop, ...), and EVERY session with a
+// connected spreadsheet auto-syncs independently every 30s. A device that
+// never happens to hold a given record's baseline in its own localStorage
+// (a different browser, a cleared cache, a first-ever sync on that device)
+// has no way to know the record was ever on the Sheet - so the instant it
+// sees "I have this record locally (from the last DB poll), but it's not on
+// the Sheet, and I have no baseline for it", it concludes this must be a
+// brand-new local record and pushes it straight back onto the Sheet (and
+// from there, back into MongoDB). That's what made deletions made via the
+// Sheet "come back" a few seconds/minutes later: some OTHER open session,
+// not the one that did the deleting, resurrected it on its own next
+// auto-sync tick.
+//
+// Fixing this means the baseline itself has to be shared, not per-browser.
+// It's stored here as a single Setting document (_id: SYNC_BASELINE_DOC_ID)
+// that every device reads before reconciling and writes back after - so
+// "was this row on the Sheet before" is answered the same way no matter
+// which device asks. This intentionally has NO role restriction (unlike
+// generic settings writes, which are HKA_MANAGEMENT/SALON_MANAGER-only via
+// authorizeCollectionAccess): any authenticated staff session can trigger a
+// background sync, so any of them must be able to read/advance this
+// baseline, exactly like persistSheetsSync below.
+const SYNC_BASELINE_DOC_ID = "sheets_sync_baseline";
+
+export async function getSheetsSyncBaseline(req: Request, res: Response) {
+  try {
+    const caller = await verifyUserToken(req.headers.authorization);
+    if (!caller) {
+      return res.status(401).json({ error: "Unauthorized: Invalid auth token." });
+    }
+    const doc: any = await Setting.findById(SYNC_BASELINE_DOC_ID).lean();
+    return res.status(200).json({
+      lastSyncedRaw: doc?.lastSyncedRaw || {},
+      missingCandidates: doc?.missingCandidates || {},
+    });
+  } catch (err: any) {
+    console.error("Error in getSheetsSyncBaseline:", err);
+    return res.status(500).json({ error: err.message || "Failed to load sync baseline." });
+  }
+}
+
+export async function saveSheetsSyncBaseline(req: Request, res: Response) {
+  try {
+    const caller = await verifyUserToken(req.headers.authorization);
+    if (!caller) {
+      return res.status(401).json({ error: "Unauthorized: Invalid auth token." });
+    }
+    const { lastSyncedRaw, missingCandidates } = req.body || {};
+    await Setting.findByIdAndUpdate(
+      SYNC_BASELINE_DOC_ID,
+      { $set: { lastSyncedRaw: lastSyncedRaw || {}, missingCandidates: missingCandidates || {} } },
+      { upsert: true, setDefaultsOnInsert: true }
+    );
+    return res.status(200).json({ success: true });
+  } catch (err: any) {
+    console.error("Error in saveSheetsSyncBaseline:", err);
+    return res.status(500).json({ error: err.message || "Failed to save sync baseline." });
+  }
 }
 
 export async function persistSheetsSync(req: Request, res: Response) {
