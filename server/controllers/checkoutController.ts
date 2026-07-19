@@ -103,7 +103,7 @@ export async function processCheckout(req: Request, res: Response) {
     }
 
     const role = userData.role;
-    if (role !== "HKA_MANAGEMENT" && role !== "SALON_MANAGER") {
+    if (role !== "HKA_MANAGEMENT" && role !== "SALON_MANAGER" && role !== "THERAPIST") {
       return res
         .status(403)
         .json({ error: "Forbidden: Anda tidak memiliki wewenang untuk melakukan checkout." });
