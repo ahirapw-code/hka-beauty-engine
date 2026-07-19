@@ -607,6 +607,27 @@ export const syncStateToSpreadsheetIncremental = async (
   const lastSyncedRawStr = localStorage.getItem('hka_sheets_last_synced_data');
   const lastSyncedRaw = lastSyncedRawStr ? JSON.parse(lastSyncedRawStr) : {};
 
+  // 2b. Load the previous run's "missing candidates" - ids that had a sync
+  // baseline but weren't found in local state on the LAST sync pass (see
+  // the "Capture new remote records" section below). Deletion through that
+  // path now requires seeing the same id missing on two consecutive sync
+  // passes in a row before it's treated as a deliberate app-side deletion,
+  // rather than deleting the instant it's absent even once. A record can
+  // look transiently absent from local state for reasons that have nothing
+  // to do with someone deleting it - a page reload racing the initial data
+  // poll, a brief network hiccup on the 4s polling fetch, a background tab
+  // getting throttled - and a single miss used to be enough to permanently
+  // wipe it from the Sheet and the database. Requiring two consecutive
+  // misses (roughly one auto-sync interval apart) still lets real
+  // deletions (e.g. ERP's "Revoke operator credentials" button) go
+  // through, just one cycle later, while giving transient blips a chance
+  // to self-correct first.
+  const missingCandidatesRawStr = localStorage.getItem('hka_sheets_missing_candidates');
+  const previousMissingCandidates: { [sheetName: string]: string[] } = missingCandidatesRawStr
+    ? JSON.parse(missingCandidatesRawStr)
+    : {};
+  const nextMissingCandidates: { [sheetName: string]: string[] } = {};
+
   const sheetNames = ['Customers', 'Bookings', 'Transactions', 'Therapists', 'Products', 'Services', 'Expenses', 'Attendance', 'Users'];
   const updatesToPush: { sheet: string; range: string; values: any[][] }[] = [];
   const appendsToPush: { [sheetName: string]: any[][] } = {};
@@ -785,25 +806,37 @@ export const syncStateToSpreadsheetIncremental = async (
     }
 
     // Capture new remote records
+    const previousMissingForSheet = new Set(previousMissingCandidates[sheetName] || []);
+    const missingThisRunForSheet: string[] = [];
+
     for (const [id, remoteInfo] of remoteMap.entries()) {
       if (!processedLocalIds.has(id)) {
         if (headers.length > 0 && lastSyncedSheet[id]) {
           // We have a sync baseline for this id (we've seen/synced it
-          // before), yet it's missing from local state entirely - that
-          // means it was deliberately removed on this side (e.g. ERP's
-          // "Revoke operator credentials" delete button), not that the
-          // Sheet just added a brand-new row. The row in the Sheet was
-          // simply never cleaned up when that delete happened.
-          //
-          // Treating this the same as a genuinely new remote row (the old
-          // behaviour) silently resurrected every app-side deletion the
-          // moment a sync ran - both in the UI (onDataLoaded overwrites
-          // local state with this reconciled list) and, for every
-          // collection except users, permanently back in MongoDB too (via
-          // persistSheetsSyncToServer's upsert). Instead, honor the local
-          // deletion: blank out the stale row in the Sheet so it stops
-          // reappearing, and drop it from the sync baseline so it isn't
-          // tracked anymore.
+          // before), and it's missing from local state right now. That's
+          // consistent with a deliberate removal on this side (e.g. ERP's
+          // "Revoke operator credentials" delete button) - but it's also
+          // consistent with a transient gap in local state that has
+          // nothing to do with deletion. Only act on it once it's been
+          // observed missing on two consecutive sync passes; a single
+          // miss just gets remembered as a candidate for next time.
+          missingThisRunForSheet.push(id);
+
+          if (!previousMissingForSheet.has(id)) {
+            // First time seeing this id missing - not confirmed yet.
+            // Deliberately don't touch nextLocalRecords, the Sheet, or
+            // deletedIds this run: if the gap was transient, the next
+            // independent data poll (every 4s, straight from the
+            // database) will have already refilled local state with the
+            // real record well before the next 30s sync tick, so it won't
+            // show up as missing again and nothing gets deleted. If it's
+            // a genuine deletion, it'll still be missing next time and
+            // will be honored then.
+            continue;
+          }
+
+          // Missing on two consecutive passes now - honor the deletion,
+          // both locally and (via deletedIds) in MongoDB.
           conflictLog.push(
             `Record ${id} dihapus di app - baris di Sheet ${sheetName} dikosongkan agar tidak muncul kembali.`
           );
@@ -823,6 +856,7 @@ export const syncStateToSpreadsheetIncremental = async (
       }
     }
 
+    nextMissingCandidates[sheetName] = missingThisRunForSheet;
     setLocalRecords(nextLocalRecords);
   }
 
@@ -882,6 +916,7 @@ export const syncStateToSpreadsheetIncremental = async (
 
   // 6. Persist baseline values for optimistic locking
   localStorage.setItem('hka_sheets_last_synced_data', JSON.stringify(newLastSyncedRaw));
+  localStorage.setItem('hka_sheets_missing_candidates', JSON.stringify(nextMissingCandidates));
 
   return {
     updatedLocalData,
