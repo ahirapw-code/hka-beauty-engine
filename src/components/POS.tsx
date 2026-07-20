@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { User, Branch, Customer, Service, Product, Therapist, Transaction, BranchProfile } from '../types';
 import { formatIDR, getMembershipTier, visitsUntilNextTier, MEMBERSHIP_TIERS, MEMBERSHIP_DISCOUNT_PERCENT } from '../utils';
 import { doc, getDoc } from '../lib/firestoreClient';
@@ -85,6 +85,11 @@ export default function POS({
   // has grown long, rather than filtering what's available to add.
   const [cartSearchQuery, setCartSearchQuery] = useState('');
   const [selectedCustomerId, setSelectedCustomerId] = useState(customers[0]?.id || '');
+  // Searchable customer picker state - lets staff type a name/phone
+  // fragment instead of scrolling a long <select> list.
+  const [customerSearchQuery, setCustomerSearchQuery] = useState('');
+  const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState(false);
+  const customerPickerRef = useRef<HTMLDivElement>(null);
   // Guards against double-submit (double-tap / accidental double-click),
   // which previously could send the same sale to processCheckout twice.
   const [isCheckingOut, setIsCheckingOut] = useState(false);
@@ -309,6 +314,27 @@ export default function POS({
       setSelectedCustomerId(activeCustomers[0]?.id || '');
     }
   }, [activeCustomers, selectedCustomerId]);
+
+  // Narrows the customer picker list down as staff types - matches
+  // against name or phone number, case-insensitive.
+  const filteredCustomers = useMemo(() => {
+    const q = customerSearchQuery.trim().toLowerCase();
+    if (!q) return activeCustomers;
+    return activeCustomers.filter(c =>
+      c.name.toLowerCase().includes(q) || c.phone.toLowerCase().includes(q)
+    );
+  }, [activeCustomers, customerSearchQuery]);
+
+  // Close the customer dropdown when clicking anywhere outside it.
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (customerPickerRef.current && !customerPickerRef.current.contains(e.target as Node)) {
+        setIsCustomerDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Combine services and products for item catalog
   const catalog = useMemo(() => {
@@ -742,17 +768,68 @@ export default function POS({
             {!showAddCustomer ? (
               <>
               <div className="flex items-center gap-2">
-                <div className="flex-1">
+                <div className="flex-1 relative" ref={customerPickerRef}>
                   <label className="text-[10px] text-slate-400 font-mono block mb-1">CUSTOMER FOR SALE</label>
-                  <select
-                    value={selectedCustomerId}
-                    onChange={(e) => setSelectedCustomerId(e.target.value)}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl text-xs px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-[#D4AF37]"
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsCustomerDropdownOpen(o => !o);
+                      setCustomerSearchQuery('');
+                    }}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl text-xs px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-[#D4AF37] flex items-center justify-between gap-2 cursor-pointer"
                   >
-                    {activeCustomers.map(c => (
-                      <option key={c.id} value={c.id}>{c.name} ({c.phone})</option>
-                    ))}
-                  </select>
+                    <span className="truncate text-left">
+                      {selectedCustomer ? `${selectedCustomer.name} (${selectedCustomer.phone})` : 'Select customer...'}
+                    </span>
+                    <Search className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                  </button>
+
+                  {isCustomerDropdownOpen && (
+                    <div className="absolute z-20 mt-1 w-full bg-slate-800 border border-slate-700 rounded-xl shadow-xl overflow-hidden">
+                      <div className="p-2 border-b border-slate-700">
+                        <div className="relative">
+                          <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                          <input
+                            type="text"
+                            autoFocus
+                            value={customerSearchQuery}
+                            onChange={(e) => setCustomerSearchQuery(e.target.value)}
+                            placeholder="Cari nama atau no. HP..."
+                            className="w-full bg-slate-900 border border-slate-700 rounded-lg text-xs pl-8 pr-7 py-1.5 text-white focus:outline-none focus:ring-1 focus:ring-[#D4AF37]"
+                          />
+                          {customerSearchQuery && (
+                            <button
+                              type="button"
+                              onClick={() => setCustomerSearchQuery('')}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 cursor-pointer"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <div className="max-h-52 overflow-y-auto">
+                        {filteredCustomers.length > 0 ? (
+                          filteredCustomers.map(c => (
+                            <button
+                              type="button"
+                              key={c.id}
+                              onClick={() => {
+                                setSelectedCustomerId(c.id);
+                                setIsCustomerDropdownOpen(false);
+                                setCustomerSearchQuery('');
+                              }}
+                              className={`w-full text-left px-3 py-2 text-xs hover:bg-slate-700/60 cursor-pointer ${c.id === selectedCustomerId ? 'bg-slate-700/60 text-[#D4AF37]' : 'text-slate-200'}`}
+                            >
+                              {c.name} <span className="text-slate-500">({c.phone})</span>
+                            </button>
+                          ))
+                        ) : (
+                          <div className="px-3 py-3 text-[11px] text-slate-500 text-center">Tidak ada pelanggan ditemukan.</div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <button
                   onClick={() => setShowAddCustomer(true)}
