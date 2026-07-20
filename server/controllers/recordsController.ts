@@ -72,6 +72,37 @@ export async function updateBookingStatus(req: Request, res: Response) {
 }
 
 /**
+ * PATCH /api/bookings/:id/details - full in-app booking edit (date, time,
+ * duration, therapist, customer, treatment, notes...). Deliberately
+ * separate from updateBookingStatus above: status flips (check-in/
+ * complete/cancel) are a narrow, permanent carve-out; this one lets staff
+ * correct/reschedule a booking's actual details from inside the app
+ * instead of only through the connected Sheet, per product decision.
+ * `status` itself is intentionally excluded from the writable fields here -
+ * that still only ever changes through the dedicated status endpoint above,
+ * which has its own overlap-safety checks.
+ */
+export async function updateBookingDetails(req: Request, res: Response) {
+  try {
+    const role = await getCallerRole(req);
+    if (!role) return res.status(401).json({ error: "Unauthorized." });
+
+    const { id } = req.params;
+    const booking = await Booking.findById(id);
+    if (!booking) return res.status(404).json({ error: "Booking not found." });
+
+    const { status: _statusDrop, id: _idDrop, ...editableFields } = req.body || {};
+    Object.assign(booking, editableFields);
+    await booking.save();
+
+    return res.status(200).json({ success: true, data: booking.toJSON() });
+  } catch (err: any) {
+    console.error("Error in updateBookingDetails:", err);
+    return res.status(500).json({ error: err.message || "Failed to update booking." });
+  }
+}
+
+/**
  * POST /api/customers - create a new client profile (management only, same
  * roles allowed to see the CRM Clients page - see Sidebar.tsx). This is
  * the missing "create" carve-out for the otherwise write-locked

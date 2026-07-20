@@ -225,6 +225,38 @@ export async function addBooking(booking: Booking): Promise<Booking> {
   }
 }
 
+// 3a. UPDATE BOOKING DETAILS (in-app edit: date/time/duration/therapist/
+// customer/treatment/notes - everything except `status`, which still only
+// ever changes through updateBookingStatus below). Goes through the same
+// dedicated, audited endpoint pattern as status updates rather than the
+// generic write-locked /api/data/bookings route - see the comment on
+// PATCH /api/bookings/:id/details in recordsController.ts.
+export async function updateBookingDetails(
+  bookingId: string,
+  edits: Partial<Omit<Booking, 'id' | 'status'>>
+): Promise<Booking> {
+  const path = `bookings/${bookingId}`;
+  try {
+    const idToken = await auth.currentUser?.getIdToken();
+    const response = await fetch(`/api/bookings/${bookingId}/details`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {})
+      },
+      body: JSON.stringify(edits)
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || `Failed to update booking (status ${response.status})`);
+    }
+    return data.data as Booking;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+    throw error;
+  }
+}
+
 // 3. UPDATE BOOKING STATUS & AUTO TRANSACTION
 export async function updateBookingStatus(
   bookingId: string, 

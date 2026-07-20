@@ -745,11 +745,27 @@ export const syncStateToSpreadsheetIncremental = async (
           const localChanged = !areRowsEqual(localRow, lastSyncedRow);
 
           if (remoteChanged && localChanged) {
-            // Conflict: Keep remote (truth)
-            const parsedRemote = parseRawSheetValues(sheetName, headers, [remoteRow])[0];
-            nextLocalRecords.push(parsedRemote);
-            conflictLog.push(`Konflik pada tab ${sheetName} (ID: ${id}) diselesaikan dengan mempertahankan data cloud.`);
-            newLastSyncedRaw[sheetName][id] = remoteRow;
+            // Conflict: every other tab keeps the Sheet as the source of
+            // truth here (a human editing the Sheet directly is assumed to
+            // know what they're doing). Bookings is a deliberate, narrow
+            // exception: booking details now have a real in-app edit flow
+            // (Bookings.tsx "Edit" - see PATCH /api/bookings/:id/details in
+            // recordsController.ts), and per product decision an app edit
+            // should win over a same-cell Sheet edit made since the last
+            // sync, not get silently discarded by the next auto-sync tick.
+            if (sheetName === 'Bookings') {
+              updatesToPush.push({ sheet: sheetName, range: `${sheetName}!A${rowNum}:${lastCol}${rowNum}`, values: [localRow] });
+              pushedCount++;
+              nextLocalRecords.push(record);
+              newLastSyncedRaw[sheetName][id] = localRow;
+              conflictLog.push(`Konflik pada tab Bookings (ID: ${id}) diselesaikan dengan mempertahankan perubahan dari app.`);
+            } else {
+              // Keep remote (truth)
+              const parsedRemote = parseRawSheetValues(sheetName, headers, [remoteRow])[0];
+              nextLocalRecords.push(parsedRemote);
+              conflictLog.push(`Konflik pada tab ${sheetName} (ID: ${id}) diselesaikan dengan mempertahankan data cloud.`);
+              newLastSyncedRaw[sheetName][id] = remoteRow;
+            }
           } else if (remoteChanged) {
             // Sync remote
             const parsedRemote = parseRawSheetValues(sheetName, headers, [remoteRow])[0];

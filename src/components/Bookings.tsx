@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { User, Branch, Booking, Customer, Service, Therapist } from '../types';
 import { formatIDR } from '../utils';
-import { Calendar, Plus, Clock, UserCheck, ShieldAlert, CheckCircle, Trash2, CheckCircle2 } from 'lucide-react';
+import { Calendar, Plus, Clock, UserCheck, ShieldAlert, CheckCircle, Trash2, CheckCircle2, Pencil } from 'lucide-react';
 
 const timeToMinutes = (timeStr: string): number => {
   if (!timeStr) return 0;
@@ -55,6 +55,7 @@ interface BookingsProps {
   therapists: Therapist[];
   users: User[];
   onAddBooking: (booking: Omit<Booking, 'id'>) => Promise<void>;
+  onUpdateBooking: (id: string, edits: Partial<Omit<Booking, 'id' | 'status'>>) => Promise<void>;
   onUpdateBookingStatus: (id: string, status: 'pending' | 'checked_in' | 'completed' | 'cancelled') => void;
 }
 
@@ -67,6 +68,7 @@ export default function Bookings({
   therapists,
   users,
   onAddBooking,
+  onUpdateBooking,
   onUpdateBookingStatus
 }: BookingsProps) {
   const isTherapist = user.role === 'THERAPIST';
@@ -106,6 +108,15 @@ export default function Bookings({
   const [generalError, setGeneralError] = useState('');
   const [isSubmittingBooking, setIsSubmittingBooking] = useState(false);
 
+  // Editing an existing booking reuses the same drawer/form as creating a
+  // new one. `editingBookingId` is null while creating; set to a booking's
+  // id while editing it.
+  const [editingBookingId, setEditingBookingId] = useState<string | null>(null);
+  const editingBooking = useMemo(
+    () => (editingBookingId ? bookings.find(b => b.id === editingBookingId) || null : null),
+    [editingBookingId, bookings]
+  );
+
   // Filtering list triggers
   const activeBranchFilter = isTherapist ? user.branch : (user.role === 'SALON_MANAGER' ? user.branch : selectedBranch);
 
@@ -126,8 +137,21 @@ export default function Bookings({
 
   // Dynamic values based on selected booking branch in form
   const branchTreatments = useMemo(() => {
-    return TREATMENT_OPTIONS.filter(t => t.branches.includes(bookingBranch));
-  }, [bookingBranch]);
+    const base = TREATMENT_OPTIONS.filter(t => t.branches.includes(bookingBranch));
+    // If we're editing a booking whose original treatment isn't one of the
+    // current fixed options for this branch (e.g. it's since been removed
+    // from TREATMENT_OPTIONS), keep it selectable so opening + saving the
+    // edit without touching this field can't silently swap the treatment
+    // to whatever happens to be first in the list.
+    if (
+      editingBooking &&
+      editingBooking.branch === bookingBranch &&
+      !base.some(t => t.id === editingBooking.serviceId)
+    ) {
+      return [...base, { id: editingBooking.serviceId, name: `${editingBooking.serviceName} (current)`, branches: [bookingBranch] as Exclude<Branch, 'ALL'>[] }];
+    }
+    return base;
+  }, [bookingBranch, editingBooking]);
 
   // Same structural fix as POS.tsx's activeTherapists: previously this only
   // read the `therapists` collection, so a SALON_MANAGER never showed up as
@@ -166,15 +190,68 @@ export default function Bookings({
         baseSalary: u.baseSalary || 0,
       }));
 
-    return [...realTherapists, ...managerTherapists];
-  }, [therapists, users, bookingBranch]);
+    const combined = [...realTherapists, ...managerTherapists];
+
+    // Same "don't silently swap it" fallback as branchTreatments above: if
+    // we're editing a booking whose therapist isn't in today's assignable
+    // list for this branch (deactivated, reassigned branches, etc), keep
+    // them selectable so the field isn't quietly defaulted to someone else.
+    if (
+      editingBooking &&
+      editingBooking.branch === bookingBranch &&
+      !combined.some(t => t.id === editingBooking.therapistId)
+    ) {
+      combined.push({
+        id: editingBooking.therapistId,
+        name: `${editingBooking.therapistName} (current)`,
+        branch: bookingBranch,
+        specialties: [],
+        rating: 0,
+        commissionRate: 0,
+        totalCommissionEarned: 0,
+        status: 'active',
+        monthlyTarget: 0,
+        currentSales: 0,
+        baseSalary: 0,
+      });
+    }
+
+    return combined;
+  }, [therapists, users, bookingBranch, editingBooking]);
 
   // Customers are branch-specific (separate NAO Studio / DIAEL Beauty client
   // bases) - only show the ones whose preferredBranch matches the branch
   // selected in this form.
   const branchCustomers = useMemo(() => {
-    return customers.filter(c => c.preferredBranch === bookingBranch);
-  }, [customers, bookingBranch]);
+    const base = customers.filter(c => c.preferredBranch === bookingBranch);
+    // Bookings only store customerName/customerPhone, not a customer id, so
+    // matching an existing booking back to a customer record for editing is
+    // best-effort (by name+phone). If nothing matches - deleted profile,
+    // different preferred branch, name edited since, walk-in that was never
+    // saved as a profile, etc - fall back to a synthetic "current" option
+    // instead of silently defaulting the dropdown (and therefore the saved
+    // customerName/customerPhone) to whichever customer happens to be first
+    // in the branch list.
+    if (
+      editingBooking &&
+      editingBooking.branch === bookingBranch &&
+      !base.some(c => c.name === editingBooking.customerName && c.phone === editingBooking.customerPhone)
+    ) {
+      return [
+        {
+          id: '__current__',
+          name: editingBooking.customerName,
+          email: '',
+          phone: editingBooking.customerPhone,
+          totalSpend: 0,
+          visitsCount: 0,
+          preferredBranch: bookingBranch,
+        },
+        ...base,
+      ];
+    }
+    return base;
+  }, [customers, bookingBranch, editingBooking]);
 
   // Set default selects when the branch swaps (or the list first loads) -
   // but NOT on every background re-poll. `branchTherapists`/`branchTreatments`
@@ -202,8 +279,8 @@ export default function Bookings({
 
   // Find the selected treatment and therapist
   const selectedTreatment = useMemo(() => {
-    return TREATMENT_OPTIONS.find(t => t.id === selectedTreatmentId);
-  }, [selectedTreatmentId]);
+    return branchTreatments.find(t => t.id === selectedTreatmentId);
+  }, [branchTreatments, selectedTreatmentId]);
 
   const selectedTherapist = useMemo(() => {
     return branchTherapists.find(t => t.id === selectedTherapistId);
@@ -213,7 +290,7 @@ export default function Bookings({
   const occupiedSlots = useMemo(() => {
     if (!selectedTherapistId || !bookingDate) return [];
     return bookings
-      .filter(b => b.therapistId === selectedTherapistId && b.date === bookingDate && b.status !== 'cancelled')
+      .filter(b => b.id !== editingBookingId && b.therapistId === selectedTherapistId && b.date === bookingDate && b.status !== 'cancelled')
       .map(b => {
         const startMin = timeToMinutes(b.time);
         const endMin = startMin + b.duration;
@@ -226,7 +303,7 @@ export default function Bookings({
         };
       })
       .sort((a, b) => a.time.localeCompare(b.time));
-  }, [bookings, selectedTherapistId, bookingDate]);
+  }, [bookings, selectedTherapistId, bookingDate, editingBookingId]);
 
   // Compute overlap conflict and auto-suggestions
   const { conflictError, availableSuggestions } = useMemo(() => {
@@ -238,7 +315,9 @@ export default function Bookings({
     const currentSlot = { date: bookingDate, time: bookingTime, duration };
 
     // Check if therapist overlaps on same branch, date, with pending/checked_in statuses
+    // (excluding the booking currently being edited - it shouldn't conflict with itself)
     const conflictingBooking = bookings.find(b => 
+      b.id !== editingBookingId &&
       b.therapistId === selectedTherapistId &&
       b.date === bookingDate &&
       b.branch === bookingBranch &&
@@ -259,6 +338,7 @@ export default function Bookings({
       availableSuggestions = branchTherapists.filter(t => {
         if (t.id === selectedTherapistId) return false;
         const hasConflict = bookings.some(b => 
+          b.id !== editingBookingId &&
           b.therapistId === t.id &&
           b.date === bookingDate &&
           b.branch === bookingBranch &&
@@ -270,15 +350,53 @@ export default function Bookings({
     }
 
     return { conflictError, availableSuggestions };
-  }, [bookings, selectedTherapistId, selectedTherapist, selectedTreatmentId, selectedTreatment, bookingDate, bookingTime, bookingDuration, branchTherapists, bookingBranch]);
+  }, [bookings, selectedTherapistId, selectedTherapist, selectedTreatmentId, selectedTreatment, bookingDate, bookingTime, bookingDuration, branchTherapists, bookingBranch, editingBookingId]);
+
+  const openCreateBooking = () => {
+    setEditingBookingId(null);
+    setBookingDate(new Date().toISOString().split('T')[0]);
+    setBookingTime('12:00');
+    setBookingDuration('');
+    setBookingNotes('');
+    setGeneralError('');
+    setShowAddBooking(true);
+  };
+
+  const closeBookingDrawer = () => {
+    setShowAddBooking(false);
+    setEditingBookingId(null);
+    setBookingDuration('');
+    setBookingNotes('');
+  };
+
+  const openEditBooking = (b: Booking) => {
+    setEditingBookingId(b.id);
+    setBookingBranch(b.branch);
+    setSelectedTreatmentId(b.serviceId);
+    setSelectedTherapistId(b.therapistId);
+    setBookingDate(b.date);
+    setBookingTime(b.time);
+    setBookingDuration(b.duration);
+    setBookingNotes(b.notes || '');
+    setGeneralError('');
+    // Customer is matched by name+phone in branchCustomers (see that memo)
+    // - fall back to the synthetic '__current__' option when there's no
+    // match, so the dropdown never silently lands on someone else.
+    const matchedCustomer = customers.find(c => c.preferredBranch === b.branch && c.name === b.customerName && c.phone === b.customerPhone);
+    setSelectedCustomerId(matchedCustomer ? matchedCustomer.id : '__current__');
+    setShowAddBooking(true);
+  };
 
   const handleBookingSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (conflictError) {
       return;
     }
-    const customer = customers.find(c => c.id === selectedCustomerId) || branchCustomers[0];
-    const treatment = TREATMENT_OPTIONS.find(t => t.id === selectedTreatmentId);
+    const customer =
+      selectedCustomerId === '__current__'
+        ? branchCustomers.find(c => c.id === '__current__')
+        : customers.find(c => c.id === selectedCustomerId) || branchCustomers[0];
+    const treatment = branchTreatments.find(t => t.id === selectedTreatmentId);
     const therapist = branchTherapists.find(t => t.id === selectedTherapistId);
     const duration = Number(bookingDuration);
 
@@ -292,28 +410,30 @@ export default function Bookings({
     setGeneralError('');
     setIsSubmittingBooking(true);
     try {
-      await onAddBooking({
+      const payload = {
         customerName: customer.name,
         customerPhone: customer.phone,
         serviceId: treatment.id,
-        serviceName: treatment.name,
+        serviceName: treatment.name.replace(' (current)', ''),
         therapistId: therapist.id,
-        therapistName: therapist.name,
+        therapistName: therapist.name.replace(' (current)', ''),
         branch: bookingBranch,
         date: bookingDate,
         time: bookingTime,
         duration,
-        price: 0,
-        status: 'pending',
         notes: bookingNotes
-      });
+      };
+
+      if (editingBookingId) {
+        await onUpdateBooking(editingBookingId, payload);
+      } else {
+        await onAddBooking({ ...payload, price: 0, status: 'pending' });
+      }
 
       // Reset Form - only on confirmed success, so a failed save leaves the
       // drawer open with the person's input intact instead of silently
       // discarding it.
-      setBookingDuration('');
-      setBookingNotes('');
-      setShowAddBooking(false);
+      closeBookingDrawer();
     } catch (err: any) {
       setGeneralError(err?.message || 'Gagal menyimpan booking. Silakan coba lagi.');
     } finally {
@@ -354,7 +474,7 @@ export default function Bookings({
 
             {!isTherapist && (
               <button
-                onClick={() => setShowAddBooking(true)}
+                onClick={openCreateBooking}
                 className="px-4 py-2 bg-[#1a1c1e] hover:bg-slate-800 text-white font-bold text-xs rounded-xl flex items-center gap-2 transition-all cursor-pointer shadow-sm"
               >
                 <Plus className="w-4 h-4 text-[#D4AF37]" />
@@ -422,6 +542,15 @@ export default function Bookings({
 
                 {/* Quick actions inside listing */}
                 <div className="flex items-center gap-1.5 self-end md:self-center">
+                  {!isTherapist && (
+                    <button
+                      onClick={() => openEditBooking(b)}
+                      title="Edit booking"
+                      className="px-2.5 py-1.5 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded-lg cursor-pointer transition-all shrink-0"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                   {b.status === 'pending' && (
                     <button
                       onClick={() => {
@@ -494,9 +623,11 @@ export default function Bookings({
         {showAddBooking && !isTherapist ? (
           <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider font-mono">Create Appointment</h3>
+              <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider font-mono">
+                {editingBookingId ? 'Edit Appointment' : 'Create Appointment'}
+              </h3>
               <button 
-                onClick={() => setShowAddBooking(false)}
+                onClick={closeBookingDrawer}
                 className="text-xs text-rose-500 font-semibold cursor-pointer"
               >
                 Cancel
@@ -671,7 +802,7 @@ export default function Bookings({
                 disabled={isSubmittingBooking}
                 className="w-full bg-[#1a1c1e] hover:bg-slate-800 text-white font-bold text-xs py-3 rounded-xl cursor-pointer mt-4 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isSubmittingBooking ? 'Menyimpan...' : 'Schedule Appointment'}
+                {isSubmittingBooking ? 'Menyimpan...' : editingBookingId ? 'Save Changes' : 'Schedule Appointment'}
               </button>
             </form>
           </div>
@@ -684,7 +815,7 @@ export default function Bookings({
             </div>
             {!isTherapist && (
               <button
-                onClick={() => setShowAddBooking(true)}
+                onClick={openCreateBooking}
                 className="w-full bg-[#D4AF37] text-[#1a1c1e] font-bold text-xs py-2 rounded-xl hover:bg-amber-400 cursor-pointer transition-all font-sans"
               >
                 Schedule Booking

@@ -18,18 +18,35 @@ export default function InvoiceTemplate({ transaction, branchProfile }: InvoiceT
   const bankInfo = branchProfile?.bankInfo || 'Informasi rekening belum disetel.';
 
   // Format Date beautifully
+  //
+  // transaction.date is written as
+  // `new Date().toISOString().substring(0, 19).replace('T', ' ')` (see
+  // checkoutController.ts / firestoreService.ts / POS.tsx) - i.e. genuine
+  // UTC wall-clock time, but with the trailing "Z" stripped and "T" swapped
+  // for a space, e.g. "2026-07-20 08:15:30". That string has no timezone
+  // marker, so `new Date(dateStr)` used to parse it as *local* time in
+  // whatever timezone the viewing device happens to be set to - wrong
+  // whenever that's not UTC+7. The salon operates in Malang (Asia/Jakarta,
+  // UTC+7), so every invoice should show WIB no matter where it's opened:
+  // (a) re-attach "Z" so the string is parsed as the UTC instant it really
+  // is, then (b) pin the display timeZone to 'Asia/Jakarta' explicitly
+  // instead of relying on the local device's timezone.
   const formatDate = (dateStr: string) => {
     try {
-      const date = new Date(dateStr);
+      const hasTimezone = /Z$|[+-]\d{2}:?\d{2}$/.test(dateStr);
+      const isoCandidate = hasTimezone ? dateStr : `${dateStr.replace(' ', 'T')}Z`;
+      const date = new Date(isoCandidate);
       if (isNaN(date.getTime())) return dateStr;
       return date.toLocaleDateString('id-ID', {
         day: '2-digit',
         month: 'short',
         year: 'numeric',
+        timeZone: 'Asia/Jakarta',
       }) + ' ' + date.toLocaleTimeString('id-ID', {
         hour: '2-digit',
-        minute: '2-digit'
-      });
+        minute: '2-digit',
+        timeZone: 'Asia/Jakarta',
+      }) + ' WIB';
     } catch {
       return dateStr;
     }

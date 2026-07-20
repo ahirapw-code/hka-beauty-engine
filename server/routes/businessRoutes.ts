@@ -4,11 +4,11 @@ import { clockInOut } from "../controllers/attendanceController.js";
 import { resetStaffPassword } from "../controllers/resetPasswordController.js";
 import { syncSheetsToFirestore, adjustTherapistCommission } from "../controllers/googleSheetsController.js";
 import { persistSheetsSync, getSheetsSyncBaseline, saveSheetsSyncBaseline } from "../controllers/sheetsPersistController.js";
-import { createBooking, createExpense, createPayrollRun, updateBookingStatus, activateMembership, createTherapist, createCustomer } from "../controllers/recordsController.js";
+import { createBooking, createExpense, createPayrollRun, updateBookingStatus, updateBookingDetails, activateMembership, createTherapist, createCustomer } from "../controllers/recordsController.js";
 import { getPayrollPreview } from "../controllers/payrollController.js";
 import { requireAuthWithProfile } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
-import { checkoutBodySchema, clockInOutBodySchema, bookingCreateSchema, bookingStatusUpdateSchema, therapistCreateSchema, therapistCommissionAdjustmentSchema, customerCreateSchema } from "../validation/schemas.js";
+import { checkoutBodySchema, clockInOutBodySchema, bookingCreateSchema, bookingUpdateSchema, bookingStatusUpdateSchema, therapistCreateSchema, therapistCommissionAdjustmentSchema, customerCreateSchema } from "../validation/schemas.js";
 
 const router = Router();
 
@@ -19,6 +19,7 @@ router.post("/syncSheetsToFirestore", syncSheetsToFirestore);
 
 router.post("/bookings", validate({ body: bookingCreateSchema }), createBooking);
 router.patch("/bookings/:id/status", validate({ body: bookingStatusUpdateSchema }), updateBookingStatus);
+router.patch("/bookings/:id/details", validate({ body: bookingUpdateSchema }), updateBookingDetails);
 router.post("/customers", validate({ body: customerCreateSchema }), createCustomer);
 router.patch("/customers/:id/membership", activateMembership);
 router.post("/therapists", validate({ body: therapistCreateSchema }), createTherapist);

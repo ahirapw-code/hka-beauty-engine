@@ -20,6 +20,7 @@ import {
   addCustomer,
   addBooking,
   updateBookingStatus,
+  updateBookingDetails,
   addTransaction,
   restockProduct,
   addExpense,
@@ -497,6 +498,40 @@ export default function App() {
     setBookings(prev => [...prev, created]);
   };
 
+  // 3b. In-app booking edit (date/time/duration/therapist/customer/
+  // treatment/notes). Reuses the same overlap guard as handleAddBooking so
+  // an edit can't quietly reschedule a booking into a slot another one of
+  // the therapist's bookings already occupies. The saved local state feeds
+  // GoogleSheetsSync's latestDataRef, so the edit rides its normal
+  // auto-sync tick out to the connected Sheet - same "smooth" path a brand
+  // new booking already takes, no separate push needed. Per product
+  // decision, a Bookings-tab edit made in-app takes priority over a
+  // same-cell edit made directly in the Sheet since the last sync (see the
+  // Bookings-only override in src/lib/googleSheets.ts's conflict
+  // resolution - every other tab still defers to the Sheet).
+  const handleUpdateBooking = async (id: string, edits: Partial<Omit<Booking, 'id' | 'status'>>) => {
+    const current = bookings.find(b => b.id === id);
+    if (!current) throw new Error('Booking not found.');
+
+    const merged = { ...current, ...edits };
+    const hasOverlap = bookings.some(b =>
+      b.id !== id &&
+      b.therapistId === merged.therapistId &&
+      b.branch === merged.branch &&
+      b.date === merged.date &&
+      (b.status === 'pending' || b.status === 'checked_in') &&
+      isBookingOverlap(merged, b)
+    );
+    if (hasOverlap) {
+      throw new Error(
+        `Terapis ${merged.therapistName} sudah memiliki jadwal yang bentrok pada slot waktu ini.`
+      );
+    }
+
+    const updated = await updateBookingDetails(id, edits);
+    setBookings(prev => prev.map(b => (b.id === id ? updated : b)));
+  };
+
   // 4. Booking Status Modification
   const handleUpdateBookingStatus = async (
     id: string, 
@@ -645,6 +680,7 @@ export default function App() {
             therapists={therapists}
             users={usersList}
             onAddBooking={handleAddBooking}
+            onUpdateBooking={handleUpdateBooking}
             onUpdateBookingStatus={handleUpdateBookingStatus}
           />
         );
