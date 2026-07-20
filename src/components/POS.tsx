@@ -80,6 +80,10 @@ export default function POS({
   const [mobileTab, setMobileTab] = useState<'catalog' | 'cart'>('catalog');
 
   const [searchQuery, setSearchQuery] = useState('');
+  // Separate from the catalog search above - filters the items already in
+  // the cart (by name), for finding one quickly among many when the cart
+  // has grown long, rather than filtering what's available to add.
+  const [cartSearchQuery, setCartSearchQuery] = useState('');
   const [selectedCustomerId, setSelectedCustomerId] = useState(customers[0]?.id || '');
   // Guards against double-submit (double-tap / accidental double-click),
   // which previously could send the same sale to processCheckout twice.
@@ -315,6 +319,16 @@ export default function POS({
     );
   }, [activeServices, activeProducts, searchQuery]);
 
+  // Items currently in the cart matching the cart search box - only used
+  // for the detailed, editable list below. The "at a glance" strip above
+  // it intentionally still shows every item unfiltered, so nothing in the
+  // cart is ever hidden from the pre-checkout overview.
+  const filteredCart = useMemo(() => {
+    const q = cartSearchQuery.trim().toLowerCase();
+    if (!q) return cart;
+    return cart.filter(item => item.name.toLowerCase().includes(q));
+  }, [cart, cartSearchQuery]);
+
   // The currently selected customer record - drives the membership badge
   // and the automatic 5% discount below.
   const selectedCustomer = useMemo(() => {
@@ -478,6 +492,7 @@ export default function POS({
 
       // Reset states
       setCart([]);
+      setCartSearchQuery('');
       setInvoiceDiscountValue(0);
       setInvoiceDiscountType('flat');
       setShowInvoice(true);
@@ -600,7 +615,7 @@ export default function POS({
               {user.role === 'HKA_MANAGEMENT' && (
                 <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200">
                   <button
-                    onClick={() => { setPosBranch('NAO_STUDIO'); setCart([]); }}
+                    onClick={() => { setPosBranch('NAO_STUDIO'); setCart([]); setCartSearchQuery(''); }}
                     className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-all ${
                       posBranch === 'NAO_STUDIO' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'
                     }`}
@@ -609,7 +624,7 @@ export default function POS({
                     <span>NAO Studio</span>
                   </button>
                   <button
-                    onClick={() => { setPosBranch('DIAEL_BEAUTY'); setCart([]); }}
+                    onClick={() => { setPosBranch('DIAEL_BEAUTY'); setCart([]); setCartSearchQuery(''); }}
                     className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-all ${
                       posBranch === 'DIAEL_BEAUTY' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'
                     }`}
@@ -826,6 +841,18 @@ export default function POS({
               is what scrolls. That's what lets the checkout footer below
               stick to the bottom of the viewport instead of being pushed
               off-screen inside a clipped box. */}
+          {cart.length > 3 && (
+            <div className="relative pt-3 shrink-0">
+              <Search className="absolute left-3.5 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />
+              <input
+                type="text"
+                placeholder="Search items in cart..."
+                value={cartSearchQuery}
+                onChange={(e) => setCartSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-[#D4AF37] focus:border-[#D4AF37]"
+              />
+            </div>
+          )}
           <div className="relative xl:flex-1 xl:min-h-0">
           <div className="py-4 space-y-3 pr-1 xl:h-full xl:overflow-y-auto">
             {cart.length === 0 ? (
@@ -833,8 +860,19 @@ export default function POS({
                 <ShoppingBag className="w-10 h-10 text-slate-700 mb-3" />
                 <p className="text-xs text-center font-mono">Receipt register is empty.<br/>Click services or products to sell.</p>
               </div>
+            ) : filteredCart.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-slate-500 py-12">
+                <Search className="w-8 h-8 text-slate-700 mb-3" />
+                <p className="text-xs text-center font-mono">No cart items match "{cartSearchQuery}".</p>
+                <button
+                  onClick={() => setCartSearchQuery('')}
+                  className="mt-2 text-[10px] text-[#D4AF37] hover:text-amber-400 font-bold cursor-pointer"
+                >
+                  Clear search
+                </button>
+              </div>
             ) : (
-              cart.map((item) => (
+              filteredCart.map((item) => (
                 <div key={item.id + item.type} className="bg-slate-800/40 p-3 rounded-2xl border border-slate-800 space-y-3">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
